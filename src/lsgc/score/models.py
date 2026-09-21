@@ -131,6 +131,13 @@ class RawScoreObservation:
     frame_height: int
     source_id: str | None = None
     source_url: str | None = None
+    source_epoch: int | None = None
+    """Media-timeline generation from live acquisition (`Frame.extra['source_epoch']`).
+
+    None when the producer does not have an epoch (archived stills, tests).
+    M7 uses this to treat a reconnect/timeline reset as a discontinuity, not
+    as a reason to clear trusted score.
+    """
 
     @property
     def both_readable(self) -> bool:

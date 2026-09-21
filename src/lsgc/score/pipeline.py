@@ -70,4 +70,10 @@ class ScoreObservationPipeline:
             frame_height=detection.frame_height,
             source_id=frame.source_id,
             source_url=frame.source_url,
+            source_epoch=_source_epoch(frame),
         )
+
+
+def _source_epoch(frame: Frame) -> int | None:
+    value = frame.extra.get("source_epoch") if frame.extra else None
+    return value if isinstance(value, int) and not isinstance(value, bool) else None

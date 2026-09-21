@@ -1,0 +1,73 @@
+{
+  "description": "Dense 2-second observation clusters for M7 default-policy replay. Each cluster is three bounded seeks at t, t+2, t+4 around a score already confirmed on an M6 labelled frame. Offsets are fixture metadata only and are not validator inputs. Expected scores were copied from the nearby M6 visual labels and must be re-checked on the captured crops before treating a cluster as a verified transition.",
+  "channel_id": "UCz3q0f-dMPNIyQhntPTE7gQ",
+  "offsets_are_fixture_metadata": "offset_s identifies a frame for replay only. Runtime tracking never looks up scores by timestamp or video id.",
+  "policy_under_test": {
+    "required_observations": 2,
+    "min_span_s": 2.0,
+    "max_candidate_gap_s": 8.0
+  },
+  "cadence_s": 2.0,
+  "recordings": [
+    {
+      "key": "giants",
+      "video_id": "hBblAZD-ApY",
+      "source_url": "https://www.youtube.com/watch?v=hBblAZD-ApY",
+      "matchup": "49ers @ Giants",
+      "frames_dir": "artifacts/m3",
+      "clusters": [
+        {"name": "init_0-0", "base_s": 40, "left_score": 0, "right_score": 0, "role": "initialize"},
+        {"name": "pre_14-7", "base_s": 350, "left_score": 14, "right_score": 7, "role": "before_change"},
+        {"name": "post_14-14", "base_s": 380, "left_score": 14, "right_score": 14, "role": "after_change"}
+      ]
+    },
+    {
+      "key": "chargers",
+      "video_id": "G2kMfIDFNIQ",
+      "source_url": "https://www.youtube.com/watch?v=G2kMfIDFNIQ",
+      "matchup": "Chargers @ 49ers",
+      "frames_dir": "artifacts/m5/chargers",
+      "clusters": [
+        {"name": "init_0-0", "base_s": 40, "left_score": 0, "right_score": 0, "role": "initialize"},
+        {"name": "pre_7-14", "base_s": 360, "left_score": 7, "right_score": 14, "role": "before_change"},
+        {"name": "post_7-21", "base_s": 415, "left_score": 7, "right_score": 21, "role": "after_change"}
+      ]
+    },
+    {
+      "key": "packers",
+      "video_id": "A8Qd1dKHKUE",
+      "source_url": "https://www.youtube.com/watch?v=A8Qd1dKHKUE",
+      "matchup": "49ers @ Packers",
+      "frames_dir": "artifacts/m5/packers",
+      "clusters": [
+        {"name": "init_0-0", "base_s": 40, "left_score": 0, "right_score": 0, "role": "initialize"},
+        {"name": "pre_7-0", "base_s": 160, "left_score": 7, "right_score": 0, "role": "before_change"},
+        {"name": "post_14-0", "base_s": 350, "left_score": 14, "right_score": 0, "role": "after_change"}
+      ]
+    },
+    {
+      "key": "raiders",
+      "video_id": "wDbkLLJT4i8",
+      "source_url": "https://www.youtube.com/watch?v=wDbkLLJT4i8",
+      "matchup": "Raiders @ 49ers",
+      "frames_dir": "artifacts/m5/raiders",
+      "clusters": [
+        {"name": "init_0-0", "base_s": 40, "left_score": 0, "right_score": 0, "role": "initialize"},
+        {"name": "pre_3-7", "base_s": 250, "left_score": 3, "right_score": 7, "role": "before_change"},
+        {"name": "post_3-14", "base_s": 360, "left_score": 3, "right_score": 14, "role": "after_change"}
+      ]
+    },
+    {
+      "key": "vikings",
+      "video_id": "UITXyHeI5KE",
+      "source_url": "https://www.youtube.com/watch?v=UITXyHeI5KE",
+      "matchup": "Vikings @ 49ers",
+      "frames_dir": "artifacts/m5/vikings",
+      "clusters": [
+        {"name": "init_0-0", "base_s": 40, "left_score": 0, "right_score": 0, "role": "initialize"},
+        {"name": "pre_0-7", "base_s": 120, "left_score": 0, "right_score": 7, "role": "before_change"},
+        {"name": "post_0-14", "base_s": 235, "left_score": 0, "right_score": 14, "role": "after_change"}
+      ]
+    }
+  ]
+}

@@ -8,10 +8,11 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 6 complete (PASS) — numeric score reading foundation.**
-The calibrated Arcade scoreboard’s left and right scores are read as raw
-per-frame observations. Those observations are **not** trusted game state.
-API, database, and frontend do not exist yet. See
+**Current milestone: 7 complete (PASS) — temporal score validation.**
+Raw per-frame score observations are confirmed over time into a conservative
+trusted visual score. **TRUSTED means temporally confirmed visual score.** It
+does not mean official, final, persisted, or manually verified. API, database,
+and frontend do not exist yet. See
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ## Requirements
@@ -181,6 +182,41 @@ instead of inventing a number. Recognition is digit localisation plus
 zero-normalised correlation against 0–9 grayscale glyphs for this channel’s
 Arcade score font — not full-frame OCR, and not a timestamp-to-score table.
 
+## Temporal score validation
+
+A raw M6 observation never overwrites trusted state. `lsgc.track` consumes a
+chronological stream of `RawScoreObservation` objects (and absences) and
+answers: what pair has enough consecutive visual evidence to trust *right now*?
+
+```python
+from lsgc.track import ConfirmationPolicy, TemporalScoreValidator
+
+validator = TemporalScoreValidator()  # required=2, min_span=2s, max_gap=8s
+result = validator.apply(observation)  # or validator.note_absence(...)
+validator.state.pair                   # None until first confirmation
+validator.history                      # in-memory ConfirmedScoreChange events
+validator.end_acquisition()            # freeze; not a game-final
+validator.reset()                      # explicit new-game boundary
+```
+
+```bash
+# deterministic JSON replay (no video)
+./.venv/bin/python -m lsgc.track replay sequence.json
+
+# thin live wiring: LiveFrameSession -> M3/M6 -> validator (developer probe)
+./.venv/bin/python -m lsgc.track live "YOUTUBE_WATCH_URL" \
+    --profile tests/fixtures/m1_fixture_profile.json \
+    --reference tests/fixtures/m3_reference.json \
+    --glyphs tests/fixtures/m6_digit_glyphs.json \
+    --expect-channel UCz3q0f-dMPNIyQhntPTE7gQ
+```
+
+Initialization also requires confirmation: the first readable frame is not
+trusted, and a session does not start at 0-0. Partial reads never invent the
+missing side. Scoreboard absence, acquisition gaps, and `source_epoch` changes
+preserve trusted score and restart candidate evidence. Football scoring rules
+are not used. Acquisition ENDED does not print FINAL.
+
 ## Continuous live acquisition
 
 `LiveFrameSession` keeps one YouTube **watch URL** open and yields sampled
@@ -221,6 +257,9 @@ python tools/m5_fixture.py capture     # needs YouTube; four M5 recordings
 python tools/m5_validate.py
 python tools/m6_validate.py            # score reading; reuses M3/M5 frames
 python tools/m6_validate.py --1080
+python tools/m7_validate.py            # sparse labelled replay (no new video)
+python tools/m7_fixture.py capture     # needs YouTube; 2s clusters
+python tools/m7_validate.py --dense    # default live policy on those clusters
 ```
 
 ## Layout
@@ -241,11 +280,15 @@ src/lsgc/
   score/        numeric score reading: digit glyphs, crop preprocess,
                 ScoreReader, detector-gated RawScoreObservation. Observation
                 only — not trusted score state.
-tools/          developer scripts for M3/M5/M6 labelled-set capture and scoring;
-                need network, never run by pytest
+  track/        temporal confirmation: ConfirmationPolicy, TrustedScoreState,
+                CandidateScore, ConfirmedScoreChange, TemporalScoreValidator.
+                In-memory only — not persistence, not a game-final.
+tools/          developer scripts for M3/M5/M6/M7 labelled-set capture and
+                scoring; need network, never run by pytest
 tests/
   fixtures/     calibration profile, M3 reference, M6 digit glyphs, M3/M5/M6
-                labelled validation metadata (no decoded frames)
+                labelled validation metadata, M7 dense-replay cluster offsets
+                (no decoded frames)
 docs/implementation-status.md
 artifacts/      generated diagnostics, gitignored
 ```

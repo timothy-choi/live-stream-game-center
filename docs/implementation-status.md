@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-21 (Milestone 6 PASS)
+Last updated: 2026-09-21 (Milestone 7 PASS)
 
 ## Product
 
@@ -35,8 +35,9 @@ No microservices, no Redis/Celery/Kafka/Kubernetes. None of this exists yet.
 | M4 | Continuous frame acquisition for a single live broadcast | **PASS, verified** |
 | M5 | Cross-matchup scoreboard-detector validation | **PASS, verified** |
 | M6 | Numeric score reading foundation | **PASS, verified** |
-| M7 | API + persistence | Not started |
-| M8 | Frontend scoreboard and game pages | Not started |
+| M7 | Temporal score validation + trusted live score state | **PASS, verified** |
+| M8 | API + persistence | Not started |
+| M9 | Frontend scoreboard and game pages | Not started |
 
 ## M0 status: PASS
 
@@ -193,13 +194,144 @@ never treated as a confirmed score change.
 Not trusted score state. No temporal confirmation, persistence, teams, clock,
 or API.
 
+## M7 status: PASS
+
+Goal: consume a chronological stream of noisy M6 `RawScoreObservation` objects
+and maintain a conservative **trusted visual score**. A raw OCR/read never
+directly overwrites trusted state.
+
+- **STATE MACHINE: VERIFIED OFFLINE** (`lsgc.track.TemporalScoreValidator`)
+- **INITIALIZATION REQUIRES CONFIRMATION: VERIFIED** — no inferred 0-0
+- **ONE-FRAME ERROR CANNOT MOVE TRUSTED STATE: VERIFIED** (injected wrong reads)
+- **ABSENCE / GAP / RECONNECT PRESERVE TRUSTED SCORE: VERIFIED**
+- **ACQUISITION END IS NOT GAME-FINAL: VERIFIED** (`frozen`, no FINAL)
+- **EXPLICIT RESET: VERIFIED**
+- **REAL ARCHIVED REPLAY: VERIFIED** on the five M6 recordings (sparse labels
+  + dense 2s clusters). **0 false trusted transitions** on sampled sequences.
+  This is not game-wide accuracy.
+
+TRUSTED means temporally confirmed visual score. It does **not** mean official
+score, final score, persisted score, or manually verified score.
+
+| Module | Purpose |
+| --- | --- |
+| `policy.py` | `ConfirmationPolicy` — the only confirmation knobs |
+| `models.py` | `TrustedScoreState`, `CandidateScore`, `ConfirmedScoreChange`, `ApplyResult` |
+| `validator.py` | `TemporalScoreValidator` — deterministic apply / absence / freeze / reset |
+| `cli.py` | `replay` (JSON, no video) and thin `live` probe |
+
+```python
+from lsgc.track import ConfirmationPolicy, TemporalScoreValidator
+
+validator = TemporalScoreValidator()
+result = validator.apply(observation)   # RawScoreObservation from M6
+# result.outcome, result.state, result.candidate, result.change
+validator.note_absence(frame_index=..., timestamp_s=..., source_epoch=...)
+validator.end_acquisition()  # freeze; not FINAL
+validator.reset()            # explicit new game
+```
+
+```bash
+./.venv/bin/python -m lsgc.track replay sequence.json
+python tools/m7_validate.py            # sparse M6 labels, gap restart off
+python tools/m7_fixture.py capture     # needs YouTube; bounded 2s clusters
+python tools/m7_validate.py --dense    # default live policy
+```
+
+A representative confirmed event (in-memory, not persisted):
+
+```
+ConfirmedScoreChange(
+    revision=2,
+    previous_left=14, previous_right=7,
+    new_left=21, new_right=7,
+    evidence_count=2,
+    first_seen_timestamp_s=4.0, first_seen_frame_index=2,
+    confirmed_timestamp_s=6.0, confirmed_frame_index=3, confirmed_epoch=1,
+    initialization=False,
+)
+```
+
+### Confirmation policy
+
+`ConfirmationPolicy` is the only knob set. Defaults:
+
+| parameter | default | why |
+| --- | --- | --- |
+| `required_observations` | **2** (minimum allowed) | one isolated observation must never become trusted; two consistent fully-readable pairs is the smallest rule that satisfies that |
+| `min_span_s` | **2.0** | M4 developer sampling cadence; two frames that share a timestamp are not independent evidence |
+| `max_candidate_gap_s` | **8.0** | four missed 2s samples; matching evidence after a longer hole restarts at count 1 rather than chaining across a discontinuity. `None` disables the time-gap restart (used only for sparse labelled replay) |
+
+No football increment/monotonicity rules. M6 confidence/margin is carried on
+the observation and is **not** multiplied into a fake probability.
+
+### Candidate semantics
+
+A candidate is one proposed pair. Evidence is **consecutive** consistent
+fully-readable observations of that pair, in order:
+
+- **start** — first fully-readable pair that is not the current trusted pair
+- **accumulate** — next matching pair within `max_candidate_gap_s`
+- **confirm** — count ≥ `required_observations` and source-time span ≥ `min_span_s` (or distinct `frame_index` if timestamps are missing)
+- **replace** — a different fully-readable pair; previous evidence is discarded
+- **reset** — trusted value reappears, or a discontinuity/gap; candidate cleared, trusted unchanged
+- **partial / unreadable** — diagnostic only; never fabricates the missing side; never confirms a pair
+
+Non-consecutive appearances of the same wrong value do not accumulate.
+
+### Ordering, duplicates, gaps
+
+- Duplicate: same `frame_index`, or same `(source_epoch, timestamp_s)`. Ignored; does not count as evidence.
+- Stale: lower `frame_index`, lower `source_epoch`, or earlier PTS in the same epoch. Ignored; cannot regress trusted state.
+- `source_epoch` increase or PTS hole > `max_candidate_gap_s`: **discontinuity**. Candidate evidence restarts. Trusted score is kept.
+- Acquisition `end_acquisition()`: freeze. Later observations are ignored. No FINAL / winner / completed-game fields exist.
+- `reset()`: explicit new-game boundary. Not inferred from 0-0, reconnect, or a long absence.
+
+### Real archived replay
+
+Two paths, both offline once frames exist. pytest never downloads video.
+
+**Sparse labelled path** (`python tools/m7_validate.py`): M6 visual labels as
+observations, `max_candidate_gap_s=None` because those offsets are tens of
+seconds apart. Measures confirmation on consecutive labelled pairs of the
+**same** score, not live 2s cadence. A score that appears only once in the
+label set (Giants `14-7` at t=350) does not confirm — that is sampling, not a
+claim the score was not on screen. Latency here is label spacing.
+
+| recording | video | obs | init | changes | starts | replacements | false transitions | last trusted |
+| --- | --- | --- | --- | --- | --- | --- | --- | --- |
+| giants | `hBblAZD-ApY` | 33 | 1 | 8 | 9 | 8 | 0 | 62-35 |
+| chargers | `G2kMfIDFNIQ` | 23 | 1 | 4 | 5 | 10 | 0 | 24-56 |
+| packers | `A8Qd1dKHKUE` | 21 | 1 | 4 | 6 | 4 | 0 | 35-7 |
+| raiders | `wDbkLLJT4i8` | 21 | 1 | 7 | 8 | 3 | 0 | 10-49 |
+| vikings | `UITXyHeI5KE` | 22 | 1 | 4 | 5 | 9 | 0 | 17-56 |
+
+**Dense 2s-cluster path** (`python tools/m7_fixture.py capture` then
+`python tools/m7_validate.py --dense`): three bounded seeks at t, t+2, t+4
+around one init score and one real change per recording. Default live policy.
+M6 reads of every cluster frame matched the expected visible pair; Giants
+t=42/352/382 and Chargers t=362 / Vikings t=237 were also checked by eye.
+Confirmation latency **2s / 2 observations** on every confirm. Jumps between
+clusters (e.g. 0-0 → 14-7) are missed-intermediate recoveries, not claims those
+games never showed 7-7.
+
+| recording | clusters (verified visible) | confirmed | latency | false |
+| --- | --- | --- | --- | --- |
+| giants | 0-0 @40, 14-7 @350, 14-14 @380 | 0-0 → 14-7 → 14-14 | 2s | 0 |
+| chargers | 0-0 @40, 7-14 @360, 7-21 @415 | 0-0 → 7-14 → 7-21 | 2s | 0 |
+| packers | 0-0 @40, 7-0 @160, 14-0 @350 | 0-0 → 7-0 → 14-0 | 2s | 0 |
+| raiders | 0-0 @40, 3-7 @250, 3-14 @360 | 0-0 → 3-7 → 3-14 | 2s | 0 |
+| vikings | 0-0 @40, 0-7 @120, 0-14 @235 | 0-0 → 0-7 → 0-14 | 2s | 0 |
+
+Do not read either table as full-game tracking.
+
 ## Verified commands
 
 ```bash
 # setup
 python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
-# tests (offline, 347 passed)
+# tests (offline, 377 passed)
 ./.venv/bin/python -m pytest
 
 # archived: 5/5 frames, 1280x720, pts 0.000-4.000s, exit 0
@@ -1036,7 +1168,7 @@ delay.
 
 - **Observations are not trusted score state.** One readable frame is not a
   confirmed score, not a score-change event, and not a game-final. Temporal
-  confirmation, persistence, and correction belong later.
+  confirmation is M7; persistence and correction belong later.
 - **One channel, one overlay font.** Glyphs describe this PRISM Arcade score
   face. A different capture setup needs its own glyphs.
 - **Held-out set is still a labelled convenience sample** (111 PRESENT
@@ -1054,12 +1186,37 @@ delay.
   “just OCR the band.”
 - **No team, logo, quarter, or clock reading.**
 
+### M7-specific limitations
+
+- **TRUSTED is not official, final, persisted, or human-verified.** It is
+  temporally confirmed visual agreement on this overlay. A stable OCR error
+  that lasts for two (or more) consecutive readable samples **will** become
+  trusted; M7 cannot prove a repeatedly seen value is false.
+- **Sparse labelled replay is not live cadence.** M6 offsets are tens of
+  seconds apart, so that path disables `max_candidate_gap_s`. Confirmation
+  latency there is label spacing. Default-policy latency was measured only on
+  the dense 2s clusters (nine frames per recording).
+- **Dense clusters are three short windows per game**, not continuous
+  tracking. Intermediate scores between clusters are not claimed. Giants
+  sparse labels include a single `14-7` (t=350) that does not confirm until
+  the dense cluster supplies a second 2s-apart sample.
+- **No football-domain protection.** A visually stable decrease, skipped
+  increment, or unusual pair will confirm if it meets the observation policy.
+- **In-memory only.** History is not written to PostgreSQL. Restarting the
+  process loses trusted state.
+- **One explicit reset / one game per broadcast** remains the MVP assumption.
+  Returning to 0-0, a reconnect, or a long absence does not start a new game.
+- **Acquisition ENDED still does not mean the Madden game is final.**
+- **M6 confidence is not a probability** and is not combined into one.
+- Controlled real disruption/recovery remains unverified from M4.
+
 ## Next action
 
-M6 is complete for its intended scope (raw numeric score observations on this
-channel’s Arcade overlay). **Trusted score state / temporal confirmation is
-not started.** Controlled real disruption/recovery remains unverified from M4.
+M7 is complete for its intended scope (temporal confirmation of raw score
+observations into in-memory trusted visual state). **API + persistence is not
+started.** Controlled real disruption/recovery remains unverified from M4.
 
-Explicitly **not** implied by M6 PASS: trusted/current/official score,
-score-change validation, persistence, API, frontend, team/logo recognition,
-opponent resolution, quarter/clock OCR, schedule discovery.
+Explicitly **not** implied by M7 PASS: official/final/persisted score, REST,
+WebSockets, frontend score cards, PostgreSQL, YouTube schedule discovery,
+team/logo recognition, opponent identity, quarter/clock OCR, owner
+corrections, automatic new-game detection, football increment rules.
