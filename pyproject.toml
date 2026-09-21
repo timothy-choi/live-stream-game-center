@@ -1,0 +1,33 @@
+[build-system]
+requires = ["setuptools>=77"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "live-stream-game-center"
+version = "0.1.0"
+description = "Backend-driven score tracking for YouTube game broadcasts (Milestone 1: frame ingestion feasibility)"
+requires-python = ">=3.11"
+dependencies = [
+    # Source resolution only. 2026.8.19 is the first stable release carrying the
+    # SABR client-selection fix; older releases pick android_vr and get HTTP 403.
+    "yt-dlp>=2026.8.19",
+    # Frame buffers handed to the future vision pipeline.
+    "numpy>=2.0",
+    # Verifies decoded frames are usable by the vision pipeline; writes diagnostics.
+    "opencv-python>=4.10",
+    # CA bundle. The macOS python.org build does not trust system roots, so
+    # HTTPS calls to YouTube fail with CERTIFICATE_VERIFY_FAILED without this.
+    "certifi>=2024.0",
+]
+
+[project.optional-dependencies]
+dev = ["pytest>=8.0"]
+
+[project.scripts]
+lsgc-probe = "lsgc.probe:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

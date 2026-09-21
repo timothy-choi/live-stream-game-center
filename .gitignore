@@ -1,0 +1,60 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+build/
+dist/
+.venv/
+venv/
+
+# Test / tooling caches
+.pytest_cache/
+.ruff_cache/
+.mypy_cache/
+
+# Generated media and diagnostic frames (never commit these).
+# The probe only ever writes under artifacts/; the extension rules below are a
+# backstop for media written elsewhere by accident. Note they are broad: when a
+# frontend milestone needs committed image assets, add negations rather than
+# dropping these. Transport-stream segments are covered by artifacts/ alone,
+# because a blanket *.ts would also swallow TypeScript sources.
+artifacts/
+*.png
+*.jpg
+*.jpeg
+*.mp4
+*.mkv
+*.webm
+*.m3u8
+*.m4s
+
+# Local environment files
+.env
+.env.*
+*.env
+!.env.example
+
+# Credentials. Cookie jars and OAuth client secrets are the likely accidents
+# here: YouTube acquisition may eventually need cookies, and the YouTube Data
+# API milestone will produce client_secret_*.json / token.json.
+# Scoped to data-file extensions on purpose: a bare *cookies* or secrets.*
+# would silently ignore future source modules such as lsgc/cookies.py.
+*cookies*.txt
+*cookies*.json
+*cookies*.jar
+*.cookies
+credentials.json
+client_secret*.json
+token.json
+*service-account*.json
+secrets.json
+secrets.y*ml
+secrets.toml
+*.pem
+*.key
+*.crt
+*.p12
+id_rsa*
+
+# OS
+.DS_Store
