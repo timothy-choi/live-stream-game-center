@@ -9,7 +9,9 @@ from lsgc.track import (
     ApplyOutcome,
     ConfirmationPolicy,
     PolicyError,
+    RestoreError,
     TemporalScoreValidator,
+    TrustedScoreState,
 )
 
 
@@ -392,3 +394,59 @@ class TestPipelineEpochPlumbing:
         assert observation is not None
         assert observation.source_epoch == 4
         assert observation.frame_index == 3
+
+
+class TestRestore:
+    def test_restores_trusted_history_not_candidate(self) -> None:
+        v = TemporalScoreValidator(DEFAULT)
+        feed(v, [obs(14, 7, index=10, ts=20.0), obs(14, 7, index=11, ts=22.0)])
+        started = v.apply(obs(21, 7, index=12, ts=24.0))
+        assert started.outcome is ApplyOutcome.CANDIDATE_STARTED
+        assert v.candidate is not None
+        restored = TemporalScoreValidator(DEFAULT)
+        restored.restore(state=v.state, history=v.history)
+        assert restored.state.pair == (14, 7)
+        assert restored.state.revision == 1
+        assert restored.candidate is None
+        assert restored.history[0].new_pair == (14, 7)
+        assert restored.state.last_observation_frame_index is None
+
+    def test_new_process_frame_index_is_not_stale(self) -> None:
+        v = TemporalScoreValidator(DEFAULT)
+        feed(v, [obs(7, 0, index=40, ts=80.0), obs(7, 0, index=41, ts=82.0)])
+        restored = TemporalScoreValidator(DEFAULT)
+        restored.restore(state=v.state, history=v.history)
+        first = restored.apply(obs(7, 0, index=0, ts=0.0, epoch=1))
+        assert first.outcome is ApplyOutcome.MATCHES_TRUSTED
+        changed = restored.apply(obs(14, 0, index=1, ts=2.0, epoch=1))
+        assert changed.outcome is ApplyOutcome.CANDIDATE_STARTED
+        confirmed = restored.apply(obs(14, 0, index=2, ts=4.0, epoch=1))
+        assert confirmed.outcome is ApplyOutcome.CONFIRMED
+        assert restored.state.pair == (14, 0)
+
+    def test_restore_rejects_mismatched_history(self) -> None:
+        v = TemporalScoreValidator(DEFAULT)
+        feed(v, [obs(0, 0, index=0, ts=0.0), obs(0, 0, index=1, ts=2.0)])
+        bad = TrustedScoreState(
+            left_score=7,
+            right_score=0,
+            initialized=True,
+            revision=1,
+        )
+        with pytest.raises(RestoreError, match="newest confirmed"):
+            TemporalScoreValidator(DEFAULT).restore(state=bad, history=v.history)
+
+    def test_restore_uninitialized_and_frozen(self) -> None:
+        empty = TrustedScoreState(
+            left_score=None,
+            right_score=None,
+            initialized=False,
+            revision=0,
+            frozen=True,
+        )
+        restored = TemporalScoreValidator(DEFAULT)
+        restored.restore(state=empty, history=())
+        assert not restored.state.initialized
+        later = restored.apply(obs(3, 0, index=0, ts=0.0))
+        assert later.outcome is ApplyOutcome.FROZEN
+

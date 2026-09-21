@@ -34,6 +34,10 @@ artifacts/
 *.env
 !.env.example
 
+# Accidental local PostgreSQL data directories
+.pgdata/
+pgdata/
+
 # Credentials. Cookie jars and OAuth client secrets are the likely accidents
 # here: YouTube acquisition may eventually need cookies, and the YouTube Data
 # API milestone will produce client_secret_*.json / token.json.

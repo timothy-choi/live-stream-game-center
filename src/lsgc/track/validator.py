@@ -11,9 +11,11 @@ YouTube, or a database.
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import replace
 
 from lsgc.score.models import RawScoreObservation
+from lsgc.track.errors import RestoreError
 from lsgc.track.models import (
     ApplyOutcome,
     ApplyResult,
@@ -65,6 +67,82 @@ class TemporalScoreValidator:
     @property
     def history(self) -> tuple[ConfirmedScoreChange, ...]:
         return tuple(self._history)
+
+    def restore(
+        self,
+        *,
+        state: TrustedScoreState,
+        history: Sequence[ConfirmedScoreChange] = (),
+    ) -> None:
+        """Load durable confirmed state after a process restart.
+
+        Restores trusted pair, revision, confirmed history, and freeze flag.
+        Does **not** restore candidate evidence, runtime observation-ordering
+        cursors (`Frame.index` / PTS / source_epoch), or transient counters
+        that exist only for the current acquisition process.
+
+        A new `LiveFrameSession` may restart `Frame.index` at 0. Persisted
+        confirmation metadata must not make those observations look stale.
+        """
+        events = tuple(history)
+        self._validate_restore(state, events)
+        self._reset_memory()
+        self._state = replace(
+            state,
+            last_observation_timestamp_s=None,
+            last_observation_frame_index=None,
+            last_observation_epoch=None,
+        )
+        self._history = list(events)
+        self._candidate = None
+        self._last_index = None
+        self._last_ts = None
+        self._last_epoch = None
+        self._frozen = bool(state.frozen)
+        self.initializations = sum(1 for event in events if event.initialization)
+        self.confirmed_changes = sum(1 for event in events if not event.initialization)
+
+    @staticmethod
+    def _validate_restore(
+        state: TrustedScoreState, events: tuple[ConfirmedScoreChange, ...]
+    ) -> None:
+        if state.revision < 0:
+            raise RestoreError(f"revision must be >= 0, got {state.revision}")
+        if state.revision == 0:
+            if state.initialized or state.left_score is not None or state.right_score is not None:
+                raise RestoreError("revision 0 must be uninitialized with NULL scores")
+            if events:
+                raise RestoreError("revision 0 cannot have confirmed history")
+            return
+        if not state.initialized:
+            raise RestoreError("revision > 0 must be initialized")
+        if state.left_score is None or state.right_score is None:
+            raise RestoreError("initialized state must have both scores")
+        if not events:
+            raise RestoreError("initialized state requires confirmed history")
+        revisions = [event.revision for event in events]
+        expected = list(range(1, len(events) + 1))
+        if revisions != expected:
+            raise RestoreError(f"history revisions must be 1..n consecutive, got {revisions}")
+        last = events[-1]
+        if last.revision != state.revision:
+            raise RestoreError(
+                f"state revision {state.revision} != last event revision {last.revision}"
+            )
+        if last.new_pair != (state.left_score, state.right_score):
+            raise RestoreError("current trusted pair must equal the newest confirmed event")
+        for index, event in enumerate(events):
+            if index == 0:
+                if not event.initialization or event.previous_pair is not None:
+                    raise RestoreError("revision 1 must be initialization with previous=NULL")
+            else:
+                if event.initialization:
+                    raise RestoreError("only revision 1 may be an initialization")
+                previous = events[index - 1]
+                if event.previous_pair != previous.new_pair:
+                    raise RestoreError("event previous pair must equal prior event new pair")
+            if event.evidence_count < 2:
+                raise RestoreError("confirmed events require evidence_count >= 2")
 
     def reset(self) -> ApplyResult:
         """Explicit new-game / new tracking context. Not inferred from video."""

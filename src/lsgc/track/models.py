@@ -94,7 +94,11 @@ class CandidateScore:
 
 @dataclass(frozen=True)
 class ConfirmedScoreChange:
-    """One confirmed transition of trusted state. In-memory; not persisted."""
+    """One confirmed transition of trusted state.
+
+    M7 holds this in memory. M8 persists the same fields. It is still not an
+    official, final, or corrected score.
+    """
 
     revision: int
     previous_left: int | None

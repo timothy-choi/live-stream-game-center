@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-21 (Milestone 7 PASS)
+Last updated: 2026-09-21 (Milestone 8 PASS)
 
 ## Product
 
@@ -22,7 +22,8 @@ Two constraints shape everything:
 ## Architectural direction
 
 Python API, Python vision/processing worker, PostgreSQL, lightweight frontend.
-No microservices, no Redis/Celery/Kafka/Kubernetes. None of this exists yet.
+No microservices, no Redis/Celery/Kafka/Kubernetes. PostgreSQL persistence
+exists (M8). REST, WebSockets, and frontend do not.
 
 ## Milestone sequence
 
@@ -36,8 +37,9 @@ No microservices, no Redis/Celery/Kafka/Kubernetes. None of this exists yet.
 | M5 | Cross-matchup scoreboard-detector validation | **PASS, verified** |
 | M6 | Numeric score reading foundation | **PASS, verified** |
 | M7 | Temporal score validation + trusted live score state | **PASS, verified** |
-| M8 | API + persistence | Not started |
-| M9 | Frontend scoreboard and game pages | Not started |
+| M8 | Durable game / trusted-score persistence + restart recovery | **PASS, verified** |
+| M9 | API (REST / live updates) | Not started |
+| M10 | Frontend scoreboard and game pages | Not started |
 
 ## M0 status: PASS
 
@@ -325,13 +327,77 @@ games never showed 7-7.
 
 Do not read either table as full-game tracking.
 
+## M8 status: PASS
+
+Goal: persist M7 confirmed visual scores and history in PostgreSQL so a
+process restart recovers trusted state without duplicating events or restoring
+unconfirmed candidates.
+
+- **SCHEMA + MIGRATIONS: VERIFIED** from an empty `lsgc_test` database
+- **IDENTITY: VERIFIED** unique `(platform, external_broadcast_id)` = YouTube video id
+- **NO IMPLIED 0-0: VERIFIED** on game create
+- **ATOMIC CONFIRMATION: VERIFIED** history append + current score in one transaction
+- **IDEMPOTENT RETRY / STALE / CONFLICT: VERIFIED**
+- **WRITE FAILURE ROLLS BACK BOTH SIDES: VERIFIED** (injected)
+- **RESTART RECOVERY: VERIFIED** new connection + `DurableScoreTracker.open`
+- **CANDIDATE NOT RESTORED: VERIFIED**
+- **NEW PROCESS Frame.index NOT STALE: VERIFIED**
+- **ACQUISITION_ENDED ≠ FINAL: VERIFIED**
+- **FIVE-RECORDING LABEL REPLAY: VERIFIED** persist, restart, continue; 0 false transitions
+
+**Persisted trusted score = temporally confirmed visual score.** Not official,
+corrected, final, or winner-certified.
+
+| Module | Purpose |
+| --- | --- |
+| `persist/models.py` | `Game`, `TrackingStatus` (`TRACKING` / `ACQUISITION_ENDED`) |
+| `persist/repository.py` | SQL; `persist_confirmation` is one transaction |
+| `persist/tracker.py` | `DurableScoreTracker`: M7 apply + persist + reload-on-write-failure |
+| `persist/migrate.py` | versioned `migrations/*.sql` |
+| `track/validator.py` `restore` | durable confirmed state only; empty runtime ordering cursors |
+
+```bash
+docker compose -f docker-compose.postgres.yml up -d
+DATABASE_URL=postgresql://lsgc:lsgc_dev@127.0.0.1:54329/lsgc \
+  ./.venv/bin/python -m lsgc.persist migrate
+LSGC_TEST_DATABASE_URL=postgresql://lsgc:lsgc_dev@127.0.0.1:54329/lsgc_test \
+  python tools/m8_validate.py
+```
+
+Stack: PostgreSQL **16.14** (compose `postgres:16-alpine`), **psycopg 3.3.6**,
+plain SQL migrations (no ORM). Chosen because the repo had no database layer
+and M8 is two tables plus transactions.
+
+Restart ordering: M7 `_last_index` / `_last_ts` / `_last_epoch` are **runtime
+session** cursors. `restore()` sets them to `None`. Persisted
+`confirmed_frame_index` is event metadata only. A new `LiveFrameSession` may
+restart `Frame.index` at 0 without those observations being `IGNORED_STALE`.
+
+Write-failure: on persist exception, `DurableScoreTracker` reloads the
+validator from PostgreSQL so memory cannot stay ahead of durable state.
+
+### Archived replay persistence (sparse M6 labels)
+
+Restart = destroy tracker, new connection, `DurableScoreTracker.open`.
+Candidate immediately after reload was **empty** on all five recordings.
+
+| recording | obs | split | before restart | events before | after continuation | events after | false |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| giants `hBblAZD-ApY` | 33 | 16 | 21-14 r4 | 4 | 62-35 r9 | 9 | 0 |
+| chargers `G2kMfIDFNIQ` | 23 | 11 | 7-14 r3 | 3 | 24-56 r5 | 5 | 0 |
+| packers `A8Qd1dKHKUE` | 21 | 10 | 14-0 r3 | 3 | 35-7 r5 | 5 | 0 |
+| raiders `wDbkLLJT4i8` | 21 | 10 | 3-14 r4 | 4 | 10-49 r8 | 8 | 0 |
+| vikings `UITXyHeI5KE` | 22 | 11 | 0-14 r3 | 3 | 17-56 r5 | 5 | 0 |
+
+Not full-game tracking. Continuation used a new `Frame.index` origin.
+
 ## Verified commands
 
 ```bash
 # setup
 python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
-# tests (offline, 377 passed)
+# tests (offline + PostgreSQL when LSGC_TEST_DATABASE_URL is set; 404 passed)
 ./.venv/bin/python -m pytest
 
 # archived: 5/5 frames, 1280x720, pts 0.000-4.000s, exit 0
@@ -1168,7 +1234,7 @@ delay.
 
 - **Observations are not trusted score state.** One readable frame is not a
   confirmed score, not a score-change event, and not a game-final. Temporal
-  confirmation is M7; persistence and correction belong later.
+  confirmation is M7; persistence is M8; correction belongs later.
 - **One channel, one overlay font.** Glyphs describe this PRISM Arcade score
   face. A different capture setup needs its own glyphs.
 - **Held-out set is still a labelled convenience sample** (111 PRESENT
@@ -1188,10 +1254,10 @@ delay.
 
 ### M7-specific limitations
 
-- **TRUSTED is not official, final, persisted, or human-verified.** It is
-  temporally confirmed visual agreement on this overlay. A stable OCR error
-  that lasts for two (or more) consecutive readable samples **will** become
-  trusted; M7 cannot prove a repeatedly seen value is false.
+- **TRUSTED is not official, final, or human-verified.** It is temporally
+  confirmed visual agreement on this overlay. A stable OCR error that lasts
+  for two (or more) consecutive readable samples **will** become trusted; M7
+  cannot prove a repeatedly seen value is false.
 - **Sparse labelled replay is not live cadence.** M6 offsets are tens of
   seconds apart, so that path disables `max_candidate_gap_s`. Confirmation
   latency there is label spacing. Default-policy latency was measured only on
@@ -1202,21 +1268,34 @@ delay.
   the dense cluster supplies a second 2s-apart sample.
 - **No football-domain protection.** A visually stable decrease, skipped
   increment, or unusual pair will confirm if it meets the observation policy.
-- **In-memory only.** History is not written to PostgreSQL. Restarting the
-  process loses trusted state.
+- **Candidate evidence is in-memory only.** M8 persists confirmed trusted
+  score and history; unconfirmed candidates do not survive restart.
 - **One explicit reset / one game per broadcast** remains the MVP assumption.
   Returning to 0-0, a reconnect, or a long absence does not start a new game.
 - **Acquisition ENDED still does not mean the Madden game is final.**
 - **M6 confidence is not a probability** and is not combined into one.
 - Controlled real disruption/recovery remains unverified from M4.
 
+### M8-specific limitations
+
+- **Persisted trusted score is still not official, corrected, or final.**
+- **Unconfirmed candidates are discarded on restart** by design. A score that
+  had evidence=1 must be observed again.
+- **One YouTube broadcast = one game.** M7 `reset()` does not delete SQL
+  history; a new broadcast id is a new row.
+- **No REST, WebSockets, frontend, schedule sync, teams, or corrections.**
+- **Compose credentials are local examples** in `.env.example`, not a
+  production secret store.
+- Controlled real disruption/recovery remains unverified from M4.
+
 ## Next action
 
-M7 is complete for its intended scope (temporal confirmation of raw score
-observations into in-memory trusted visual state). **API + persistence is not
-started.** Controlled real disruption/recovery remains unverified from M4.
+M8 is complete for its intended scope (durable confirmed visual score +
+restart recovery). **REST / live client updates are not started.** Controlled
+real disruption/recovery remains unverified from M4.
 
-Explicitly **not** implied by M7 PASS: official/final/persisted score, REST,
-WebSockets, frontend score cards, PostgreSQL, YouTube schedule discovery,
-team/logo recognition, opponent identity, quarter/clock OCR, owner
-corrections, automatic new-game detection, football increment rules.
+Explicitly **not** implied by M8 PASS: official/final/corrected score, REST,
+WebSockets, frontend, YouTube schedule discovery, team/logo recognition,
+opponent identity, quarter/clock OCR, owner corrections, automatic new-game
+detection, football increment rules.
+

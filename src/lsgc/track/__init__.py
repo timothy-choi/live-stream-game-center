@@ -6,7 +6,7 @@ becomes trusted. Acquisition ending does not mark a game final.
 Knows nothing of yt-dlp, FFmpeg, or databases.
 """
 
-from lsgc.track.errors import PolicyError, TrackError
+from lsgc.track.errors import PolicyError, RestoreError, TrackError
 from lsgc.track.models import (
     ApplyOutcome,
     ApplyResult,
@@ -25,6 +25,7 @@ __all__ = [
     "ConfirmationPolicy",
     "ConfirmedScoreChange",
     "PolicyError",
+    "RestoreError",
     "TemporalScoreValidator",
     "TrackError",
     "TrustedScoreState",

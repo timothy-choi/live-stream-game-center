@@ -11,3 +11,7 @@ class TrackError(Exception):
 
 class PolicyError(TrackError):
     """Confirmation policy is malformed."""
+
+
+class RestoreError(TrackError):
+    """Durable confirmed state cannot be restored into the validator."""

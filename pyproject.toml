@@ -18,6 +18,8 @@ dependencies = [
     # CA bundle. The macOS python.org build does not trust system roots, so
     # HTTPS calls to YouTube fail with CERTIFICATE_VERIFY_FAILED without this.
     "certifi>=2024.0",
+    # PostgreSQL driver for durable trusted-score persistence (M8).
+    "psycopg[binary]>=3.2",
 ]
 
 [project.optional-dependencies]
@@ -30,9 +32,13 @@ lsgc-detect = "lsgc.vision.cli:main"
 lsgc-live-probe = "lsgc.live.cli:main"
 lsgc-score = "lsgc.score.cli:main"
 lsgc-track = "lsgc.track.cli:main"
+lsgc-persist = "lsgc.persist.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+markers = [
+    "postgres: needs a real PostgreSQL test database (LSGC_TEST_DATABASE_URL)",
+]
