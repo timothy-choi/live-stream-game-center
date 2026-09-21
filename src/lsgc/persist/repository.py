@@ -15,12 +15,21 @@ from psycopg.rows import dict_row
 
 from lsgc.persist.errors import (
     ConflictingConfirmationError,
+    ConflictingMatchupError,
     PersistError,
     SchemaError,
     StaleConfirmationError,
     UnknownGameError,
 )
-from lsgc.persist.models import Game, PersistOutcome, PersistResult, PlatformLifecycle, TrackingStatus
+from lsgc.persist.models import (
+    Game,
+    MatchupPersistResult,
+    PersistOutcome,
+    PersistResult,
+    PlatformLifecycle,
+    TrackingStatus,
+)
+from lsgc.identity.models import ConfirmedMatchupChange, IdentityMethod
 from lsgc.track.models import ConfirmedScoreChange
 
 _GAME_COLUMNS = """
@@ -31,7 +40,12 @@ _GAME_COLUMNS = """
     created_at, updated_at,
     title, platform_lifecycle, scheduled_start_at, actual_start_at,
     actual_end_at, last_synced_at, tracking_enabled,
-    last_tracking_error, last_worker_finished_at
+    last_tracking_error, last_worker_finished_at,
+    confirmed_left_team_id, confirmed_right_team_id, matchup_revision,
+    matchup_confirmed_at, matchup_confirmed_timestamp_s,
+    matchup_confirmed_frame_index, matchup_confirmed_epoch,
+    matchup_left_method, matchup_right_method,
+    matchup_conflict_count, last_matchup_conflict
 """
 
 
@@ -44,6 +58,24 @@ def event_payload_matches(stored: ConfirmedScoreChange, incoming: ConfirmedScore
         and stored.new_left == incoming.new_left
         and stored.new_right == incoming.new_right
         and stored.initialization == incoming.initialization
+        and stored.evidence_count == incoming.evidence_count
+        and stored.first_seen_timestamp_s == incoming.first_seen_timestamp_s
+        and stored.first_seen_frame_index == incoming.first_seen_frame_index
+        and stored.confirmed_timestamp_s == incoming.confirmed_timestamp_s
+        and stored.confirmed_frame_index == incoming.confirmed_frame_index
+        and stored.confirmed_epoch == incoming.confirmed_epoch
+    )
+
+
+def matchup_payload_matches(
+    stored: ConfirmedMatchupChange, incoming: ConfirmedMatchupChange
+) -> bool:
+    return (
+        stored.revision == incoming.revision
+        and stored.left_team_id == incoming.left_team_id
+        and stored.right_team_id == incoming.right_team_id
+        and stored.left_method == incoming.left_method
+        and stored.right_method == incoming.right_method
         and stored.evidence_count == incoming.evidence_count
         and stored.first_seen_timestamp_s == incoming.first_seen_timestamp_s
         and stored.first_seen_frame_index == incoming.first_seen_frame_index
@@ -471,6 +503,191 @@ class PostgresGameRepository:
         ).fetchone()
         return None if row is None else _change_from_row(row)
 
+    @_serialized
+    def list_matchup_changes(self, game_id: UUID) -> tuple[ConfirmedMatchupChange, ...]:
+        rows = self._conn.execute(
+            """
+            SELECT revision, left_team_id, right_team_id, left_method, right_method,
+                   evidence_count, first_seen_timestamp_s, first_seen_frame_index,
+                   confirmed_timestamp_s, confirmed_frame_index, confirmed_epoch
+              FROM confirmed_matchup_changes
+             WHERE game_id = %s
+             ORDER BY revision
+            """,
+            (game_id,),
+        ).fetchall()
+        return tuple(_matchup_from_row(row) for row in rows)
+
+    @_serialized
+    def persist_matchup_confirmation(
+        self, game_id: UUID, change: ConfirmedMatchupChange
+    ) -> MatchupPersistResult:
+        """Append matchup history and set current confirmed pair. Never rewrites."""
+        if change.left_team_id == change.right_team_id:
+            raise ConflictingMatchupError("left and right team ids must differ")
+        try:
+            with self._conn.transaction():
+                row = self._conn.execute(
+                    f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s FOR UPDATE",
+                    (game_id,),
+                ).fetchone()
+                if row is None:
+                    raise UnknownGameError(f"game {game_id} not found")
+                current = _game_from_row(row)
+                if change.revision == current.matchup_revision:
+                    stored = self._load_matchup_revision(game_id, change.revision)
+                    if stored is not None and matchup_payload_matches(stored, change):
+                        return MatchupPersistResult(
+                            PersistOutcome.IDEMPOTENT, current, stored
+                        )
+                    raise ConflictingMatchupError(
+                        f"matchup revision {change.revision} already persisted "
+                        "with different data"
+                    )
+                if current.matchup_revision > 0:
+                    raise ConflictingMatchupError(
+                        "confirmed matchup cannot be rewritten; "
+                        f"persisted {current.confirmed_left_team_id}/"
+                        f"{current.confirmed_right_team_id} revision "
+                        f"{current.matchup_revision}"
+                    )
+                if change.revision != 1:
+                    raise ConflictingMatchupError(
+                        f"expected matchup revision 1, got {change.revision}"
+                    )
+                return self._insert_and_update_matchup(game_id, change)
+        except UniqueViolation as exc:
+            stored = self._load_matchup_revision(game_id, change.revision)
+            if stored is not None and matchup_payload_matches(stored, change):
+                return MatchupPersistResult(
+                    PersistOutcome.IDEMPOTENT, self.get_game(game_id), stored
+                )
+            raise ConflictingMatchupError(
+                f"matchup revision {change.revision} unique conflict"
+            ) from exc
+
+    def _insert_and_update_matchup(
+        self, game_id: UUID, change: ConfirmedMatchupChange
+    ) -> MatchupPersistResult:
+        self._conn.execute(
+            """
+            INSERT INTO confirmed_matchup_changes (
+                id, game_id, revision, left_team_id, right_team_id,
+                left_method, right_method, evidence_count,
+                first_seen_timestamp_s, first_seen_frame_index,
+                confirmed_timestamp_s, confirmed_frame_index,
+                confirmed_epoch, persisted_at
+            ) VALUES (
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+            )
+            """,
+            (
+                uuid4(),
+                game_id,
+                change.revision,
+                change.left_team_id,
+                change.right_team_id,
+                change.left_method.value,
+                change.right_method.value,
+                change.evidence_count,
+                change.first_seen_timestamp_s,
+                change.first_seen_frame_index,
+                change.confirmed_timestamp_s,
+                change.confirmed_frame_index,
+                change.confirmed_epoch,
+                datetime.now(tz=UTC),
+            ),
+        )
+        now = datetime.now(tz=UTC)
+        self._conn.execute(
+            """
+            UPDATE games SET
+                confirmed_left_team_id = %s,
+                confirmed_right_team_id = %s,
+                matchup_revision = %s,
+                matchup_confirmed_at = %s,
+                matchup_confirmed_timestamp_s = %s,
+                matchup_confirmed_frame_index = %s,
+                matchup_confirmed_epoch = %s,
+                matchup_left_method = %s,
+                matchup_right_method = %s,
+                updated_at = %s
+             WHERE id = %s
+            """,
+            (
+                change.left_team_id,
+                change.right_team_id,
+                change.revision,
+                now,
+                change.confirmed_timestamp_s,
+                change.confirmed_frame_index,
+                change.confirmed_epoch,
+                change.left_method.value,
+                change.right_method.value,
+                now,
+                game_id,
+            ),
+        )
+        game = self.get_game(game_id)
+        return MatchupPersistResult(PersistOutcome.APPLIED, game, change)
+
+    def _load_matchup_revision(
+        self, game_id: UUID, revision: int
+    ) -> ConfirmedMatchupChange | None:
+        row = self._conn.execute(
+            """
+            SELECT revision, left_team_id, right_team_id, left_method, right_method,
+                   evidence_count, first_seen_timestamp_s, first_seen_frame_index,
+                   confirmed_timestamp_s, confirmed_frame_index, confirmed_epoch
+              FROM confirmed_matchup_changes
+             WHERE game_id = %s AND revision = %s
+            """,
+            (game_id, revision),
+        ).fetchone()
+        return None if row is None else _matchup_from_row(row)
+
+    @_serialized
+    def record_matchup_conflict(
+        self, game_id: UUID, conflict_pair: tuple[str, str]
+    ) -> Game:
+        now = datetime.now(tz=UTC)
+        label = f"{conflict_pair[0]}/{conflict_pair[1]}"
+        with self._conn.transaction():
+            row = self._conn.execute(
+                f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s FOR UPDATE",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                raise UnknownGameError(f"game {game_id} not found")
+            self._conn.execute(
+                """
+                UPDATE games SET
+                    matchup_conflict_count = matchup_conflict_count + 1,
+                    last_matchup_conflict = %s,
+                    updated_at = %s
+                 WHERE id = %s
+                """,
+                (label, now, game_id),
+            )
+        return self.get_game(game_id)
+
+
+def _matchup_from_row(row: dict_row | dict) -> ConfirmedMatchupChange:
+    return ConfirmedMatchupChange(
+        revision=int(row["revision"]),
+        left_team_id=row["left_team_id"],
+        right_team_id=row["right_team_id"],
+        left_method=IdentityMethod(row["left_method"]),
+        right_method=IdentityMethod(row["right_method"]),
+        evidence_count=int(row["evidence_count"]),
+        first_seen_timestamp_s=row["first_seen_timestamp_s"],
+        first_seen_frame_index=row["first_seen_frame_index"],
+        confirmed_timestamp_s=row["confirmed_timestamp_s"],
+        confirmed_frame_index=row["confirmed_frame_index"],
+        confirmed_epoch=row["confirmed_epoch"],
+        initialization=int(row["revision"]) == 1,
+    )
+
 
 def _game_from_row(row: dict_row | dict) -> Game:
     tracking_enabled = row.get("tracking_enabled")
@@ -501,6 +718,17 @@ def _game_from_row(row: dict_row | dict) -> Game:
         tracking_enabled=bool(tracking_enabled),
         last_tracking_error=row.get("last_tracking_error"),
         last_worker_finished_at=row.get("last_worker_finished_at"),
+        confirmed_left_team_id=row.get("confirmed_left_team_id"),
+        confirmed_right_team_id=row.get("confirmed_right_team_id"),
+        matchup_revision=int(row.get("matchup_revision") or 0),
+        matchup_confirmed_at=row.get("matchup_confirmed_at"),
+        matchup_confirmed_timestamp_s=row.get("matchup_confirmed_timestamp_s"),
+        matchup_confirmed_frame_index=row.get("matchup_confirmed_frame_index"),
+        matchup_confirmed_epoch=row.get("matchup_confirmed_epoch"),
+        matchup_left_method=row.get("matchup_left_method"),
+        matchup_right_method=row.get("matchup_right_method"),
+        matchup_conflict_count=int(row.get("matchup_conflict_count") or 0),
+        last_matchup_conflict=row.get("last_matchup_conflict"),
     )
 
 

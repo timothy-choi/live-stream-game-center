@@ -80,17 +80,18 @@ class TestMigrations:
         with connect(postgres_dsn) as conn:
             try:
                 conn.execute(
-                    "DROP TABLE IF EXISTS confirmed_score_changes, games, schema_migrations CASCADE"
+                    "DROP TABLE IF EXISTS confirmed_matchup_changes, confirmed_score_changes, games, schema_migrations CASCADE"
                 )
                 conn.commit()
                 first = apply_migrations(conn)
                 conn.commit()
                 assert 1 in first
                 assert 2 in first
+                assert 3 in first
                 again = apply_migrations(conn)
                 conn.commit()
                 assert again == []
-                assert applied_versions(conn) == [1, 2]
+                assert applied_versions(conn) == [1, 2, 3]
                 tables = conn.execute(
                     """
                     SELECT tablename FROM pg_tables
@@ -101,6 +102,7 @@ class TestMigrations:
                 names = {row["tablename"] for row in tables}
                 assert "games" in names
                 assert "confirmed_score_changes" in names
+                assert "confirmed_matchup_changes" in names
                 assert "schema_migrations" in names
             finally:
                 apply_migrations(conn)

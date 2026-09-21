@@ -89,7 +89,7 @@ def test_migration_adds_lifecycle_columns(migrated_dsn: str) -> None:
         versions = conn.execute(
             "SELECT version FROM schema_migrations ORDER BY version"
         ).fetchall()
-        assert [row["version"] for row in versions] == [1, 2]
+        assert [row["version"] for row in versions] == [1, 2, 3]
 
 
 def test_scheduled_becomes_live_same_row(repo: PostgresGameRepository) -> None:

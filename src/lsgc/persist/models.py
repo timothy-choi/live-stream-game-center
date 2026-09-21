@@ -11,6 +11,7 @@ from datetime import datetime
 from enum import Enum
 from uuid import UUID
 
+from lsgc.identity.models import ConfirmedMatchupChange, ConfirmedMatchupState
 from lsgc.track.models import ConfirmedScoreChange, TrustedScoreState
 
 PLATFORM_YOUTUBE = "youtube"
@@ -67,6 +68,17 @@ class Game:
     tracking_enabled: bool = True
     last_tracking_error: str | None = None
     last_worker_finished_at: datetime | None = None
+    confirmed_left_team_id: str | None = None
+    confirmed_right_team_id: str | None = None
+    matchup_revision: int = 0
+    matchup_confirmed_at: datetime | None = None
+    matchup_confirmed_timestamp_s: float | None = None
+    matchup_confirmed_frame_index: int | None = None
+    matchup_confirmed_epoch: int | None = None
+    matchup_left_method: str | None = None
+    matchup_right_method: str | None = None
+    matchup_conflict_count: int = 0
+    last_matchup_conflict: str | None = None
 
     @property
     def pair(self) -> tuple[int, int] | None:
@@ -88,9 +100,37 @@ class Game:
             frozen=self.tracking_status is TrackingStatus.ACQUISITION_ENDED,
         )
 
+    def matchup_state(self) -> ConfirmedMatchupState:
+        initialized = self.matchup_revision > 0
+        conflict_pair = None
+        raw = self.last_matchup_conflict
+        if raw and "/" in raw:
+            left, _, right = raw.partition("/")
+            if left and right and "/" not in right:
+                conflict_pair = (left, right)
+        return ConfirmedMatchupState(
+            left_team_id=self.confirmed_left_team_id,
+            right_team_id=self.confirmed_right_team_id,
+            initialized=initialized,
+            revision=self.matchup_revision,
+            last_confirmed_timestamp_s=self.matchup_confirmed_timestamp_s,
+            last_confirmed_frame_index=self.matchup_confirmed_frame_index,
+            last_confirmed_epoch=self.matchup_confirmed_epoch,
+            conflict_count=self.matchup_conflict_count,
+            last_conflict_pair=conflict_pair,
+            frozen=self.tracking_status is TrackingStatus.ACQUISITION_ENDED,
+        )
+
 
 @dataclass(frozen=True)
 class PersistResult:
     outcome: PersistOutcome
     game: Game
     change: ConfirmedScoreChange
+
+
+@dataclass(frozen=True)
+class MatchupPersistResult:
+    outcome: PersistOutcome
+    game: Game
+    change: ConfirmedMatchupChange

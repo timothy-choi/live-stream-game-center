@@ -27,3 +27,7 @@ class StaleConfirmationError(PersistError):
 
 class ConflictingConfirmationError(PersistError):
     """Same revision with different payload, or a skipped revision."""
+
+
+class ConflictingMatchupError(PersistError):
+    """Matchup already confirmed with a different pair, or bad revision."""

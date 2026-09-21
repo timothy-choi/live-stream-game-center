@@ -8,12 +8,11 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 9 complete (PASS) — YouTube broadcast lifecycle
-orchestration.** The backend discovers scheduled/live/ended broadcasts for an
-explicit connected channel, upserts them by exact YouTube video ID, and starts
-at most one local tracking worker per eligible LIVE broadcast — with zero
-viewers. **YouTube ENDED / acquisition ENDED does not mean GAME FINAL.**
-REST, WebSockets, and frontend do not exist yet. See
+**Current milestone: 10 complete (PASS) — team identity recognition, temporal
+matchup confirmation, and durable confirmed matchup persistence.** Confirmed
+matchup is temporally confirmed **visual scoreboard identity**. It is not
+schedule truth, title-derived truth, or owner-verified truth. REST,
+WebSockets, and frontend do not exist yet. See
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ## Requirements
@@ -21,7 +20,7 @@ REST, WebSockets, and frontend do not exist yet. See
 - Python 3.11+ (verified on 3.13)
 - FFmpeg and ffprobe on `PATH` (verified on 8.1.2)
 - PostgreSQL 16 for persistence (optional for offline tests; required to
-  recover confirmed scores after a restart)
+  recover confirmed scores and confirmed matchups after a restart)
 - YouTube Data API v3 credentials for M9 broadcast discovery (API key and/or
   OAuth access token). Never committed; see `.env.example`.
 
@@ -285,7 +284,7 @@ Configuration (placeholders in `.env.example`; never commit real values):
 | `LSGC_YOUTUBE_CHANNEL_ID` or `LSGC_YOUTUBE_CHANNEL_IDS` | explicit connected channel(s); no hardcoded `UC…` in source |
 | `LSGC_YOUTUBE_API_KEY` | Data API key (`search.list` + `videos.list`) |
 | `LSGC_YOUTUBE_ACCESS_TOKEN` | optional OAuth; prefers `liveBroadcasts.list mine=true` |
-| `LSGC_CALIBRATION_DIR` | `{dir}/{channel_id}/profile.json` + `reference.json` + `glyphs.json` |
+| `LSGC_CALIBRATION_DIR` | `{dir}/{channel_id}/profile.json` + `reference.json` + `glyphs.json` + optional `logos.json` |
 | `LSGC_BROADCAST_SYNC_INTERVAL_S` | poll interval; default 1800s with an API key, 120s with OAuth |
 
 Tracking starts only when: the broadcast belongs to the configured channel,
@@ -294,11 +293,65 @@ calibration exists, and no local worker already owns the ID. Missing
 calibration is `NOT_READY` — another channel’s profile is never substituted.
 
 The supervisor keeps **zero or one** in-process worker per broadcast ID.
-Each worker is `LiveFrameSession` → `ScoreObservationPipeline` →
-`DurableScoreTracker`. Opening a game page is not involved.
+Each worker is `LiveFrameSession` → shared M3 presence check → independent
+score path (`ScoreObservationPipeline` → `DurableScoreTracker`) and identity
+path (`MatchupObservationPipeline` → `DurableMatchupTracker`). Opening a
+game page is not involved.
 
 ```
 python tools/m9_validate.py   # optional real Data API check; never run by pytest
+```
+
+## Team identity and confirmed matchup
+
+M10 reads **who is on the scoreboard**, independently of M6/M7/M8 scores.
+
+Layers stay separate:
+
+1. `TeamIdentityObservation` — one calibrated crop, one side, one frame.
+2. `MatchupObservation` — left + right from a scoreboard-present frame.
+3. `ConfirmedMatchup` — the same complete pair seen repeatedly in order.
+4. Durable confirmed matchup — PostgreSQL fields + append-only
+   `confirmed_matchup_changes`.
+
+A raw logo/name read never overwrites the durable pair. After confirmation,
+a different complete pair is a **CONFLICT**: the original pair is kept
+(one broadcast = one game). Candidate votes are not stored.
+
+**Canonical identity** is a stable team code (`SF`, `NYG`, `GB`, `LAC`, `LV`,
+`MIN`, …), not the display name. Left/right are scoreboard positions, not
+home/away. The catalog lists 32 NFL teams; **visual templates currently
+cover the six teams observed on this Arcade fixture.**
+
+Presentation routing follows M2 `IdentityPresentation`: attempt usable
+name/abbreviation text first (exact aliases only; no fuzzy guess), otherwise
+logo recognition. The established Madden 27 Arcade fixture is **LOGO** on
+both sides, so the practical path is logo matching. Text OCR on this overlay
+is unimplemented and unvalidated (`UnvalidatedTextReader`).
+
+Logo method (this overlay, after comparing grayscale ZNCC, color cosine,
+and combinations): 32×24 grayscale descriptor, zero-normalised correlation,
+gated by mean-BGR cosine. Combined score = min(ZNCC, color). Reject unless
+the winner clears `min_score=0.70` and beats the next team by
+`min_margin=0.15`. Those cuts were frozen on construction/tuning crops.
+Similarity is a heuristic, not a probability. UNKNOWN is a correct outcome.
+
+Runtime recognition does not use video IDs, titles, timestamps, playlist
+position, or expected-matchup fields. A YouTube title may be stored by M9
+and compared after confirmation for logging; a disagreement does not rewrite
+visual identity.
+
+Default temporal policy (live 2s cadence): two complete distinct-team pairs
+spanning ≥ 2.0s, with an 8s candidate gap. Sparse labelled offsets disable
+the gap the same way M7 sparse replay does.
+
+```bash
+./.venv/bin/python -m lsgc.identity read \
+    tests/fixtures/m1_fixture_profile.json \
+    tests/fixtures/m10_logo_templates.json \
+    artifacts/m3/t0040.000.png \
+    --reference tests/fixtures/m3_reference.json \
+    --expect-channel UCz3q0f-dMPNIyQhntPTE7gQ
 ```
 
 ## Continuous live acquisition
@@ -346,6 +399,9 @@ python tools/m7_fixture.py capture     # needs YouTube; 2s clusters
 python tools/m7_validate.py --dense    # default live policy on those clusters
 python tools/m8_validate.py            # M7+M8 persist/restart; needs PostgreSQL
 python tools/m9_validate.py            # optional YouTube Data API metadata check
+python tools/m10_validate.py           # identity+matchup; reuses M3/M5 frames
+python tools/m10_validate.py --1080
+python tools/m10_validate.py --postgres
 ```
 
 ## Layout
@@ -369,18 +425,22 @@ src/lsgc/
   track/        temporal confirmation: ConfirmationPolicy, TrustedScoreState,
                 CandidateScore, ConfirmedScoreChange, TemporalScoreValidator.
                 restore() loads durable confirmed state; not a game-final.
-  persist/      PostgreSQL games + append-only confirmed_score_changes,
-                DurableScoreTracker. No REST.
+  persist/      PostgreSQL games + append-only confirmed_score_changes and
+                confirmed_matchup_changes, DurableScoreTracker,
+                DurableMatchupTracker. No REST.
+  identity/     team catalog, logo templates, presentation routing,
+                MatchupObservationPipeline, TemporalMatchupValidator.
+                Raw identity is not a confirmed matchup.
   broadcast/    YouTube Data API discovery, schedule sync, eligibility,
                 in-process TrackingSupervisor. Control plane only.
 migrations/     versioned SQL
 docker-compose.postgres.yml
-tools/          developer scripts for M3–M9 labelled-set capture and scoring;
+tools/          developer scripts for M3–M10 labelled-set capture and scoring;
                 network/DB as noted, never run by default pytest
 tests/
-  fixtures/     calibration profile, M3 reference, M6 digit glyphs, M3/M5/M6
-                labelled validation metadata, M7 dense-replay cluster offsets
-                (no decoded frames)
+  fixtures/     calibration profile, M3 reference, M6 digit glyphs, M10 logo
+                templates, M3/M5/M6/M10 labelled validation metadata, M7
+                dense-replay cluster offsets (no decoded frames)
 docs/implementation-status.md
 artifacts/      generated diagnostics, gitignored
 ```

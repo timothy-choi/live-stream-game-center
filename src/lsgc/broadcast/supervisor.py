@@ -19,6 +19,8 @@ from lsgc.broadcast.models import (
 )
 from lsgc.broadcast.sanitize import sanitize_control_plane_text
 from lsgc.broadcast.worker import (
+    IdentityPipelineFactory,
+    MatchupTrackerFactory,
     PipelineFactory,
     SessionFactory,
     TrackerFactory,
@@ -44,6 +46,8 @@ class TrackingSupervisor:
         session_factory: SessionFactory | None = None,
         pipeline_factory: PipelineFactory | None = None,
         tracker_factory: TrackerFactory | None = None,
+        identity_pipeline_factory: IdentityPipelineFactory | None = None,
+        matchup_tracker_factory: MatchupTrackerFactory | None = None,
         clock: ClockFn = _utc_now,
         retry_initial_s: float = DEFAULT_WORKER_RETRY_INITIAL_S,
         retry_max_s: float = DEFAULT_WORKER_RETRY_MAX_S,
@@ -55,6 +59,8 @@ class TrackingSupervisor:
         self._session_factory = session_factory
         self._pipeline_factory = pipeline_factory
         self._tracker_factory = tracker_factory
+        self._identity_pipeline_factory = identity_pipeline_factory
+        self._matchup_tracker_factory = matchup_tracker_factory
         self._clock = clock
         self._retry_initial_s = retry_initial_s
         self._retry_max_s = retry_max_s
@@ -116,6 +122,8 @@ class TrackingSupervisor:
                 session_factory=self._session_factory,
                 pipeline_factory=self._pipeline_factory,
                 tracker_factory=self._tracker_factory,
+                identity_pipeline_factory=self._identity_pipeline_factory,
+                matchup_tracker_factory=self._matchup_tracker_factory,
                 frame_interval_s=self._frame_interval_s,
             )
             self._workers[broadcast_id] = worker

@@ -17,7 +17,7 @@ import numpy as np
 from lsgc.models import Frame
 from lsgc.score.models import RawScoreObservation
 from lsgc.score.reader import ScoreReader
-from lsgc.vision.detector import ScoreboardDetector
+from lsgc.vision.detector import DetectionResult, ScoreboardDetector
 
 
 class ScoreObservationPipeline:
@@ -49,8 +49,9 @@ class ScoreObservationPipeline:
             frame_height=detection.frame_height,
         )
 
-    def observe_frame(self, frame: Frame) -> RawScoreObservation | None:
-        detection = self.detector.detect_frame(frame)
+    def observe_with_detection(
+        self, frame: Frame, detection: DetectionResult
+    ) -> RawScoreObservation | None:
         if not detection.present:
             return None
         left, right = self.reader.read_image(frame.image, self.detector.profile)
@@ -72,6 +73,10 @@ class ScoreObservationPipeline:
             source_url=frame.source_url,
             source_epoch=_source_epoch(frame),
         )
+
+    def observe_frame(self, frame: Frame) -> RawScoreObservation | None:
+        detection = self.detector.detect_frame(frame)
+        return self.observe_with_detection(frame, detection)
 
 
 def _source_epoch(frame: Frame) -> int | None:

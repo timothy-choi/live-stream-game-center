@@ -8,6 +8,7 @@ from typing import Protocol
 
 from lsgc.calibration.profile import CalibrationProfile
 from lsgc.calibration.storage import load_profile
+from lsgc.identity.logos import LogoTemplateSet, load_logo_templates
 from lsgc.score.glyphs import DigitGlyphSet, load_glyphs
 from lsgc.vision.reference import ScoreboardReference, load_reference
 
@@ -17,6 +18,7 @@ class ChannelCalibration:
     profile: CalibrationProfile
     reference: ScoreboardReference
     glyphs: DigitGlyphSet
+    logos: LogoTemplateSet | None = None
 
 
 class CalibrationLookup(Protocol):
@@ -38,6 +40,9 @@ class MappingCalibrationLookup:
 
 class FilesystemCalibrationLookup:
     """`{root}/{channel_id}/profile.json` + `reference.json` + `glyphs.json`.
+
+    Optional `logos.json` supplies identity templates. Missing logos is allowed:
+    score tracking still starts; identity observations stay UNKNOWN.
 
     Highest revision wins when several profiles share one profile_id.
     Distinct profile_id values for the same channel are ambiguous: return None
@@ -73,4 +78,14 @@ class FilesystemCalibrationLookup:
             glyphs = load_glyphs(glyphs_path, expect_channel=channel_id)
         except Exception:
             return None
-        return ChannelCalibration(profile=profile, reference=reference, glyphs=glyphs)
+        logos = None
+        logos_path = directory / "logos.json"
+        if logos_path.is_file():
+            try:
+                logos = load_logo_templates(logos_path, expect_channel=channel_id)
+                logos.assert_matches(profile)
+            except Exception:
+                return None
+        return ChannelCalibration(
+            profile=profile, reference=reference, glyphs=glyphs, logos=logos
+        )

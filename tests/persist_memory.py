@@ -7,6 +7,7 @@ from uuid import UUID, uuid4
 
 from lsgc.persist.errors import (
     ConflictingConfirmationError,
+    ConflictingMatchupError,
     PersistError,
     SchemaError,
     StaleConfirmationError,
@@ -14,12 +15,18 @@ from lsgc.persist.errors import (
 )
 from lsgc.persist.models import (
     Game,
+    MatchupPersistResult,
     PersistOutcome,
     PersistResult,
     PlatformLifecycle,
     TrackingStatus,
 )
-from lsgc.persist.repository import event_payload_matches, validate_broadcast_id
+from lsgc.persist.repository import (
+    event_payload_matches,
+    matchup_payload_matches,
+    validate_broadcast_id,
+)
+from lsgc.identity.models import ConfirmedMatchupChange
 from lsgc.track.models import ConfirmedScoreChange
 
 
@@ -28,8 +35,11 @@ class InMemoryGameRepository:
         self._games: dict[UUID, Game] = {}
         self._by_identity: dict[tuple[str, str], UUID] = {}
         self._history: dict[UUID, list[ConfirmedScoreChange]] = {}
+        self._matchup_history: dict[UUID, list[ConfirmedMatchupChange]] = {}
         self.fail_next_persist = False
         self.fail_next_end = False
+        self.fail_next_matchup_persist = False
+        self.fail_next_matchup_conflict = False
 
     def create_or_get_game(
         self,
@@ -67,6 +77,7 @@ class InMemoryGameRepository:
         self._games[game.id] = game
         self._by_identity[identity] = game.id
         self._history[game.id] = []
+        self._matchup_history[game.id] = []
         return game
 
     def get_game(self, game_id: UUID) -> Game:
@@ -238,6 +249,72 @@ class InMemoryGameRepository:
             raise SchemaError("current revision must equal newest event")
         if history[-1].new_pair != game.pair:
             raise SchemaError("current trusted score must equal newest event")
+
+    def list_matchup_changes(self, game_id: UUID) -> tuple[ConfirmedMatchupChange, ...]:
+        self.get_game(game_id)
+        return tuple(self._matchup_history[game_id])
+
+    def persist_matchup_confirmation(
+        self, game_id: UUID, change: ConfirmedMatchupChange
+    ) -> MatchupPersistResult:
+        if self.fail_next_matchup_persist:
+            self.fail_next_matchup_persist = False
+            raise PersistError("injected matchup write failure")
+        if change.left_team_id == change.right_team_id:
+            raise ConflictingMatchupError("left and right team ids must differ")
+        game = self.get_game(game_id)
+        history = list(self._matchup_history[game_id])
+        if change.revision == game.matchup_revision:
+            stored = next((e for e in history if e.revision == change.revision), None)
+            if stored is not None and matchup_payload_matches(stored, change):
+                return MatchupPersistResult(PersistOutcome.IDEMPOTENT, game, stored)
+            raise ConflictingMatchupError(
+                f"matchup revision {change.revision} already persisted with different data"
+            )
+        if game.matchup_revision > 0:
+            raise ConflictingMatchupError(
+                "confirmed matchup cannot be rewritten; "
+                f"persisted {game.confirmed_left_team_id}/{game.confirmed_right_team_id}"
+            )
+        if change.revision != 1:
+            raise ConflictingMatchupError(
+                f"expected matchup revision 1, got {change.revision}"
+            )
+        now = datetime.now(tz=UTC)
+        updated = self._replace(
+            game,
+            confirmed_left_team_id=change.left_team_id,
+            confirmed_right_team_id=change.right_team_id,
+            matchup_revision=change.revision,
+            matchup_confirmed_at=now,
+            matchup_confirmed_timestamp_s=change.confirmed_timestamp_s,
+            matchup_confirmed_frame_index=change.confirmed_frame_index,
+            matchup_confirmed_epoch=change.confirmed_epoch,
+            matchup_left_method=change.left_method.value,
+            matchup_right_method=change.right_method.value,
+            updated_at=now,
+        )
+        history.append(change)
+        self._games[game_id] = updated
+        self._matchup_history[game_id] = history
+        return MatchupPersistResult(PersistOutcome.APPLIED, updated, change)
+
+    def record_matchup_conflict(
+        self, game_id: UUID, conflict_pair: tuple[str, str]
+    ) -> Game:
+        if self.fail_next_matchup_conflict:
+            self.fail_next_matchup_conflict = False
+            raise PersistError("injected matchup conflict write failure")
+        game = self.get_game(game_id)
+        now = datetime.now(tz=UTC)
+        updated = self._replace(
+            game,
+            matchup_conflict_count=game.matchup_conflict_count + 1,
+            last_matchup_conflict=f"{conflict_pair[0]}/{conflict_pair[1]}",
+            updated_at=now,
+        )
+        self._games[game_id] = updated
+        return updated
 
     def _replace(self, game: Game, **changes: object) -> Game:
         data = game.__dict__.copy()

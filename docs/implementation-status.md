@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-21 (Milestone 9 PASS)
+Last updated: 2026-09-21 (Milestone 10 PASS)
 
 ## Product
 
@@ -24,7 +24,9 @@ Two constraints shape everything:
 Python API, Python vision/processing worker, PostgreSQL, lightweight frontend.
 No microservices, no Redis/Celery/Kafka/Kubernetes. PostgreSQL persistence
 exists (M8). YouTube broadcast discovery and local tracking orchestration
-exist (M9). REST, WebSockets, and frontend do not.
+exist (M9). Visual team identity, temporal matchup confirmation, and durable
+confirmed matchup persistence exist (M10). REST, WebSockets, and frontend do
+not.
 
 ## Milestone sequence
 
@@ -40,8 +42,9 @@ exist (M9). REST, WebSockets, and frontend do not.
 | M7 | Temporal score validation + trusted live score state | **PASS, verified** |
 | M8 | Durable game / trusted-score persistence + restart recovery | **PASS, verified** |
 | M9 | YouTube broadcast discovery + tracking-session orchestration | **PASS, verified** |
-| M10 | API (REST / live updates) | Not started |
-| M11 | Frontend scoreboard and game pages | Not started |
+| M10 | Team / opponent identity + temporal matchup + durable matchup | **PASS, verified** |
+| M11 | API (REST / live updates) | Not started |
+| M12 | Frontend scoreboard and game pages | Not started |
 
 ## M0 status: PASS
 
@@ -1419,15 +1422,143 @@ delay.
   evidence, or when a discovered item is already ENDED.
 - **YouTube ENDED still does not mean Madden game-final.**
 
+## M10 status: PASS
+
+Goal: recognize the teams actually shown on the gameplay scoreboard, confirm
+the left/right pair over time, and persist that confirmed matchup so it
+survives restart — without using title, schedule, playlist, or expected
+opponents as recognition input.
+
+- **IDENTITY ARCHITECTURE: VERIFIED** (`lsgc.identity`) — catalog, raw
+  observation, matchup observation, temporal validator, durable tracker
+- **LOGO RECOGNITION ON ARCADE LOGO FIXTURE: VERIFIED** held-out 235/238
+  labelled sides correct, 0 incorrect, 3 UNKNOWN
+- **M3 GATING: VERIFIED** 21/21 scoreboard-absent hard negatives produced no
+  matchup observation
+- **TEMPORAL CONFIRMATION: VERIFIED** offline A–O plus archived sparse and
+  2s-cadence confirmation of the labelled pair on all five recordings
+- **NO FALSE CONFIRMED MATCHUPS** on held-out archived frames
+- **PERSISTENCE + RESTART: VERIFIED** offline and PostgreSQL
+- **M9 WORKER DUAL PATH: VERIFIED** score and identity failures are independent
+- **1080p: VERIFIED** on existing `artifacts/m3_1080` samples (3 present:
+  2 both-correct, 1 detector-gated absent at t=360; confirmed SF/NYG)
+
+**Confirmed matchup = temporally confirmed visual scoreboard identity.**
+It is not official schedule truth, title-derived truth, or owner-verified
+truth.
+
+### Canonical IDs and catalog
+
+`team_id` is the stable code (SF, NYG, GB, LAC, LV, MIN, …). Display names
+are not identity. Left/right are scoreboard positions, not home/away.
+
+Catalog support: 32 NFL teams. **Visually validated recognition: SF, NYG,
+LAC, GB, LV, MIN** on this fixture. Do not read catalog size as coverage.
+
+### Presentation routing
+
+M2 identity regions for this channel are both `LOGO`. Architecture still
+tries name/abbreviation first when those flags are set (exact aliases only).
+This fixture cannot validate text OCR; `UnvalidatedTextReader` returns
+UNKNOWN so logo fallback can run. Full-frame OCR is not used.
+
+### Logo method
+
+Compared on construction crops: grayscale 32×24 ZNCC, mean-BGR cosine, and
+min(ZNCC, color). True combined scores ≥ ~0.87, false ≤ ~0.53, true margins
+≥ ~0.34. Frozen thresholds: `min_score=0.70`, `min_margin=0.15`. Heuristic
+similarity is not a calibrated probability.
+
+Construction templates (excluded from held-out): Giants t=240 L=SF R=NYG;
+Chargers t=40 L=LAC R=SF; Packers t=40 R=GB; Raiders t=40 L=LV; Vikings
+t=40 L=MIN. Two SF patches because left and right crop geometry differ.
+Provenance is documentation; runtime matching does not read video IDs.
+
+### Held-out visual results (720p labelled set + 1080p extras)
+
+Sides: labelled 238, correct 235, incorrect 0, UNKNOWN 3.
+accuracy_all=0.987, accuracy_readable=1.000, coverage=0.987.
+
+| team | n | correct | incorrect | UNKNOWN |
+| --- | --- | --- | --- | --- |
+| SF | 119 | 117 | 0 | 2 |
+| NYG | 36 | 35 | 0 | 1 |
+| LAC | 22 | 22 | 0 | 0 |
+| GB | 20 | 20 | 0 | 0 |
+| LV | 20 | 20 | 0 | 0 |
+| MIN | 21 | 21 | 0 | 0 |
+
+UNKNOWN: Packers t=1320 left SF combined 0.689 (below 0.70); Giants 1080p
+t=360 labelled present but M3 ABSENT so identity did not run (counts as
+UNKNOWN both sides). Thresholds were not relaxed.
+
+Matchup/frame (720p held-out present): Giants 33/33 both-correct; Chargers
+22/22; Packers 19 both + 1 partial; Raiders 20/20; Vikings 21/21; 1080p
+2 both-correct + 1 both-unknown. Zero any-wrong frames.
+
+Scoreboard-absent: 21 gated, 0 leaked (includes TOUCHDOWN / EXTRA POINT).
+
+### Temporal policy
+
+Default (live): `required_observations=2`, `min_span_s=2.0`,
+`max_candidate_gap_s=8.0`. Justified by M4's 2s cadence: two in-order
+complete pairs spanning at least one sample interval, with a gap reset so
+scattered lifetime votes cannot accumulate.
+
+Sparse labelled offsets are tens of seconds apart, so archived labelled
+replay disables the gap (same as M7 sparse). Default policy was also run on
+held-out 2s pairs t=42, t=44 for each 720p recording: all five confirmed the
+labelled pair, no false confirmations.
+
+Confirmation latency on sparse labels is label spacing (second present
+frame), not live cadence. Live-cadence latency on t=42/44 is 2.0s / 2
+observations.
+
+After confirmation, a different complete pair increments `conflict_count`
+and is persisted as `last_matchup_conflict`; the confirmed pair is not
+rewritten.
+
+### Persistence
+
+Migration `003_confirmed_matchup.sql` (does not edit 001/002):
+
+- `games.confirmed_left_team_id` / `confirmed_right_team_id` nullable
+- `matchup_revision` 0 ⇒ both NULL; >0 ⇒ both non-NULL and left ≠ right
+- team-id shape `^[A-Z]{2,3}$`
+- append-only `confirmed_matchup_changes` unique `(game_id, revision)`
+
+Creating a game row does not invent a matchup. Idempotent retry of the same
+payload is `IDEMPOTENT`. A different pair after confirmation is
+`ConflictingMatchupError`. Write failure reloads the validator from durable
+state.
+
+YouTube title remains metadata. Visual identity is not parsed from it.
+
+### M10-specific limitations
+
+- **Six visually validated teams**, not 32. Unobserved logos have no
+  templates and would return UNKNOWN.
+- **LOGO presentation only** is validated. Name/abbreviation OCR is an
+  explicit unvalidated interface.
+- **One channel, one Arcade overlay.** Another capture setup needs its own
+  templates and threshold measurement.
+- **Packers t=1320 left** is a true UNKNOWN at the frozen 0.70 cut. A stable
+  fade/compression that stays below the cut will not confirm that side.
+- **1080p t=360** was detector-gated; identity was not attempted. Not an
+  arbitrary-resolution claim.
+- **Confirmed matchup is not owner-corrected.** Later contradictory visual
+  evidence surfaces CONFLICT; it does not recalibrate.
+- **No final-score, winner, quarter, or clock reading.**
+- **Sparse confirmation latency is label spacing.**
+
 ## Next action
 
-M9 is complete for its intended scope (channel-scoped YouTube discovery +
-local tracking orchestration). **REST / live client updates are not
+M10 is complete for its intended scope (visual identity + temporal matchup
++ durable confirmed matchup). **REST / live client updates are not
 started.** Controlled real disruption/recovery remains unverified from M4.
-Real Data API live listing was not run in this environment.
 
-Explicitly **not** implied by M9 PASS: official/final/corrected score, REST,
-WebSockets, frontend, team/logo recognition, opponent identity, quarter/clock
-OCR, owner corrections, automatic new-game detection, football increment
-rules, multi-host locking, OAuth onboarding UI.
+Explicitly **not** implied by M10 PASS: official/final/corrected score,
+REST, WebSockets, frontend, owner matchup correction, title-derived
+matchup, 32-team visual coverage, text-mode OCR, quarter/clock OCR,
+automatic new-game detection, football increment rules, multi-host locking.
 

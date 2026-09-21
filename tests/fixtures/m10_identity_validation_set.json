@@ -1,0 +1,1550 @@
+{
+  "description": "Held-out identity labels for M10. Labels were established by human inspection of visible logos plus known game context. Offsets identify frames for regression only and are never recognizer inputs. Construction frames used to build tests/fixtures/m10_logo_templates.json are excluded.",
+  "channel_id": "UCz3q0f-dMPNIyQhntPTE7gQ",
+  "profile_id": "madden27-arcade-prismlive",
+  "profile": "tests/fixtures/m1_fixture_profile.json",
+  "reference": "tests/fixtures/m3_reference.json",
+  "logos": "tests/fixtures/m10_logo_templates.json",
+  "visually_validated_team_ids": [
+    "SF",
+    "NYG",
+    "LAC",
+    "GB",
+    "LV",
+    "MIN"
+  ],
+  "catalog_team_count": 32,
+  "construction_frames": [
+    {
+      "key": "giants",
+      "offset_s": 240,
+      "side": "L",
+      "team_id": "SF"
+    },
+    {
+      "key": "giants",
+      "offset_s": 240,
+      "side": "R",
+      "team_id": "NYG"
+    },
+    {
+      "key": "chargers",
+      "offset_s": 40,
+      "side": "L",
+      "team_id": "LAC"
+    },
+    {
+      "key": "chargers",
+      "offset_s": 40,
+      "side": "R",
+      "team_id": "SF"
+    },
+    {
+      "key": "packers",
+      "offset_s": 40,
+      "side": "R",
+      "team_id": "GB"
+    },
+    {
+      "key": "raiders",
+      "offset_s": 40,
+      "side": "L",
+      "team_id": "LV"
+    },
+    {
+      "key": "vikings",
+      "offset_s": 40,
+      "side": "L",
+      "team_id": "MIN"
+    }
+  ],
+  "thresholds": {
+    "min_score": 0.7,
+    "min_margin": 0.15,
+    "frozen_before_held_out": true
+  },
+  "offsets_are_fixture_metadata": "offset_s identifies a frame for regression only. It is never an input to recognition, confirmation, or persistence.",
+  "recordings": [
+    {
+      "key": "giants",
+      "video_id": "hBblAZD-ApY",
+      "directory": "artifacts/m3",
+      "title": "49ers @ Giants (M1 fixture)",
+      "left_team_id": "SF",
+      "right_team_id": "NYG",
+      "construction_offsets_s": [
+        240
+      ],
+      "samples": [
+        {
+          "offset_s": 0,
+          "scoreboard_present": false,
+          "state": "pregame_menu",
+          "notes": "QUICK PLAY team-select screen",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 5,
+          "scoreboard_present": false,
+          "state": "pregame_menu",
+          "notes": "QUICK PLAY team-select screen",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 10,
+          "scoreboard_present": false,
+          "state": "pregame_menu",
+          "notes": "QUICK PLAY team-select screen",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 20,
+          "scoreboard_present": true,
+          "state": "scoreboard_fading_in",
+          "notes": "HARD POSITIVE: board is animating in, dimmer and lower-contrast than steady state",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 30,
+          "scoreboard_present": true,
+          "state": "normal_gameplay_playcall_menu",
+          "notes": "1st 5:00, 0-0, formation menu over the field",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 40,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:59, 0-0, active play",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 115,
+          "scoreboard_present": true,
+          "state": "normal_gameplay_playcall_menu",
+          "notes": "1st 4:06, 0-0, menu still loading",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 125,
+          "scoreboard_present": false,
+          "state": "touchdown_banner",
+          "notes": "HARD NEGATIVE: TOUCHDOWN banner in the scoreboard band, NY logo both sides",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 130,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:02, 0-6, PAT",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 140,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:02, 0-7, kickoff",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 3:30, 6-7, PAT",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 215,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 3:30, 7-7",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 3:06, 42-21, 2nd & 7",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 300,
+          "scoreboard_present": true,
+          "state": "normal_gameplay_playcall_menu",
+          "notes": "1st 2:25, 7-7, SHORT PASS menu",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 350,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 2:03, 14-7",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 360,
+          "scoreboard_present": false,
+          "state": "touchdown_banner",
+          "notes": "HARD NEGATIVE: TOUCHDOWN banner, NY logo both sides",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 370,
+          "scoreboard_present": false,
+          "state": "extra_point_banner",
+          "notes": "HARD NEGATIVE: EXTRA POINT banner occupying the same band",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 380,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:52, 14-14, kickoff",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 420,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:33, 14-14",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 470,
+          "scoreboard_present": true,
+          "state": "normal_gameplay_playcall_menu",
+          "notes": "1st 1:08, 21-14, formation menu",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 540,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 0:15, 21-14, 1st & Goal",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 565,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 5:00, 21-14, first frames of a new quarter",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 600,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 4:50, 21-21",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 660,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 4:21, 28-21, kickoff",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 780,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 2:51, 28-21, midfield background",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 900,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 1:14, 28-21, endzone background",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 960,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 0:25, 28-21, 2nd & Goal",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1020,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 0:00, 35-21, end of half",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1030,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 5:00, 35-21, first frames of second half",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1080,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 4:21, 35-21",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1140,
+          "scoreboard_present": false,
+          "state": "touchdown_banner_with_playcall",
+          "notes": "HARD NEGATIVE: red SF TOUCHDOWN banner plus a play-call menu",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1150,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 3:35, 42-21, kickoff",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1160,
+          "scoreboard_present": true,
+          "state": "normal_gameplay_playcall_menu",
+          "notes": "3rd 3:31, 42-21, menu",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1305,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 1:49, 48-21, PAT",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1560,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 3:57, 49-28, 2nd & Goal",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1620,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 3:30, 56-28",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1740,
+          "scoreboard_present": true,
+          "state": "normal_gameplay_playcall_menu",
+          "notes": "4th 1:51, 56-28, SHORT PASS menu",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1800,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 1:06, 62-28, PAT",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1860,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 0:52, 62-35",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1908,
+          "scoreboard_present": true,
+          "state": "normal_gameplay_playcall_menu",
+          "notes": "4th 0:06, 62-35, near the end of the addressable recording",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true
+        }
+      ]
+    },
+    {
+      "key": "chargers",
+      "video_id": "G2kMfIDFNIQ",
+      "directory": "artifacts/m5/chargers",
+      "title": "Chargers @ 49ers Game 2 - Super Season 7",
+      "left_team_id": "LAC",
+      "right_team_id": "SF",
+      "construction_offsets_s": [
+        40
+      ],
+      "samples": [
+        {
+          "offset_s": 5,
+          "scoreboard_present": false,
+          "state": "pregame_menu",
+          "notes": "QUICK PLAY team-select",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 20,
+          "scoreboard_present": false,
+          "state": "loading",
+          "notes": "Madden 27 Arcade loading / DID YOU KNOW",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 80,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:23, 0-0",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 100,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:04, 0-0",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 110,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:01, 0-6 PAT",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 120,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:01, 0-7 kickoff",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 160,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 3:38, 0-7",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 3:01, 0-7",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 250,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 2:46, 7-7",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 285,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 2:21, 7-13 PAT",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 300,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 2:19, 7-14 kickoff",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 360,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:44, 7-14 4th & Inches",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 415,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:29, 7-21",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 500,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 0:21, 7-21 2nd & Goal",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 600,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 4:29, 14-21",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 720,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 3:29, 14-28",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 840,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 2:19, 14-35",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 960,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 0:57, 17-35",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1080,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 4:52, 17-42",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 3:40, 24-42",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1320,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 2:20, 24-49",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1500,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 0:29, 24-56 kickoff",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1650,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 4:03, 24-56",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1800,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 1:58, 24-56",
+          "split": "held_out",
+          "left_team_id": "LAC",
+          "right_team_id": "SF",
+          "frame_exists": true
+        }
+      ]
+    },
+    {
+      "key": "packers",
+      "video_id": "A8Qd1dKHKUE",
+      "directory": "artifacts/m5/packers",
+      "title": "49ers @ Packers Game 8 - Super Season 7",
+      "left_team_id": "SF",
+      "right_team_id": "GB",
+      "construction_offsets_s": [
+        40
+      ],
+      "samples": [
+        {
+          "offset_s": 5,
+          "scoreboard_present": false,
+          "state": "pregame_menu",
+          "notes": "QUICK PLAY team-select",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 20,
+          "scoreboard_present": false,
+          "state": "loading",
+          "notes": "Madden 27 Arcade loading / DID YOU KNOW",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 80,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:36, 0-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 120,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:04, 0-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 160,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 3:51, 7-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 3:14, 7-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 250,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 2:43, 7-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 300,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:59, 7-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 340,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:36, 13-0 PAT",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 350,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:35, 14-0 kickoff",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 400,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 0:54, 14-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 420,
+          "scoreboard_present": false,
+          "state": "touchdown_banner",
+          "notes": "HARD NEGATIVE: SF TOUCHDOWN banner, SF logo both sides",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 430,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 0:37, 21-0 kickoff",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 500,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 5:00, 21-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 600,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 3:44, 21-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 720,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 2:02, 21-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 840,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 0:24, 21-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 960,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 4:15, 28-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1080,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 3:10, 35-0",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 1:50, 35-7",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1320,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 0:08, 35-7 2nd & Goal",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1500,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 3:33, 38-14",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1650,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 1:51, 45-14",
+          "split": "held_out",
+          "left_team_id": "SF",
+          "right_team_id": "GB",
+          "frame_exists": true
+        }
+      ]
+    },
+    {
+      "key": "raiders",
+      "video_id": "wDbkLLJT4i8",
+      "directory": "artifacts/m5/raiders",
+      "title": "Raiders @ 49ers Game 10 - Super Season 7",
+      "left_team_id": "LV",
+      "right_team_id": "SF",
+      "construction_offsets_s": [
+        40
+      ],
+      "samples": [
+        {
+          "offset_s": 5,
+          "scoreboard_present": false,
+          "state": "pregame_menu",
+          "notes": "QUICK PLAY team-select",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 20,
+          "scoreboard_present": false,
+          "state": "loading",
+          "notes": "Madden 27 Arcade loading",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 80,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:22, 0-0",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 90,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:16, 0-6 PAT",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 95,
+          "scoreboard_present": false,
+          "state": "extra_point_banner",
+          "notes": "HARD NEGATIVE: EXTRA POINT banner, SF logo both sides",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 105,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:13, 0-7 kickoff",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 160,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 3:33, 0-7",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 2:58, 0-7",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 250,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 2:27, 3-7 field goal",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 300,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:51, 3-7",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 360,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:26, 3-14",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 420,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 0:57, 3-14",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 465,
+          "scoreboard_present": false,
+          "state": "extra_point_banner",
+          "notes": "HARD NEGATIVE: EXTRA POINT graphic covering the scoreboard band during kick UI",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 500,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 0:15, 3-21",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 600,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 4:21, 3-21",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 720,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 3:26, 3-28",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 840,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 2:10, 10-28",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 960,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 0:28, 10-28",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1080,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 4:19, 10-35",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 2:51, 10-35",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1320,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 1:53, 10-42",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1500,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 4:41, 10-49",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1650,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 2:50, 10-49",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1800,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 0:40, 10-49",
+          "split": "held_out",
+          "left_team_id": "LV",
+          "right_team_id": "SF",
+          "frame_exists": true
+        }
+      ]
+    },
+    {
+      "key": "vikings",
+      "video_id": "UITXyHeI5KE",
+      "directory": "artifacts/m5/vikings",
+      "title": "Vikings @ 49ers Game 45 - Super Season 7",
+      "left_team_id": "MIN",
+      "right_team_id": "SF",
+      "construction_offsets_s": [
+        40
+      ],
+      "samples": [
+        {
+          "offset_s": 5,
+          "scoreboard_present": false,
+          "state": "pregame_menu",
+          "notes": "QUICK PLAY team-select",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 20,
+          "scoreboard_present": false,
+          "state": "loading",
+          "notes": "Madden 27 Arcade loading",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 80,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:21, 0-0",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 100,
+          "scoreboard_present": false,
+          "state": "touchdown_banner_with_playcall",
+          "notes": "HARD NEGATIVE: SF TOUCHDOWN banner plus play-type menu",
+          "split": "hard_negative",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true
+        },
+        {
+          "offset_s": 102,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:05, 0-6 PAT",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 120,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 4:02, 0-7",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 160,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 3:40, 0-7",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 3:12, 0-7",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 235,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 2:52, 0-14 kickoff",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 300,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 2:16, 0-14",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 360,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:35, 0-14",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 420,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 1:03, 0-21",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 470,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 0:22, 6-21 PAT",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 500,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1st 0:17, 7-21",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 600,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 4:14, 7-28",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 720,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 2:49, 7-28",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 840,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "2nd 0:58, 7-28",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 960,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 4:52, 7-35",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1080,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 3:39, 10-35",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1200,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 2:17, 10-42",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1320,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "3rd 0:51, 10-49 kickoff",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1500,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 4:17, 17-49",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1650,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 2:23, 17-56",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        },
+        {
+          "offset_s": 1800,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "4th 0:23, 17-56",
+          "split": "held_out",
+          "left_team_id": "MIN",
+          "right_team_id": "SF",
+          "frame_exists": true
+        }
+      ]
+    },
+    {
+      "key": "giants_1080",
+      "video_id": "hBblAZD-ApY",
+      "directory": "artifacts/m3_1080",
+      "title": "49ers @ Giants 1080p samples",
+      "left_team_id": "SF",
+      "right_team_id": "NYG",
+      "construction_offsets_s": [],
+      "samples": [
+        {
+          "offset_s": 5,
+          "scoreboard_present": false,
+          "state": "pregame_menu",
+          "notes": "1080p scaled-calibration check",
+          "split": "hard_negative_1080",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true,
+          "resolution": "1920x1080"
+        },
+        {
+          "offset_s": 360,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1080p scaled-calibration check",
+          "split": "held_out_1080",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true,
+          "resolution": "1920x1080"
+        },
+        {
+          "offset_s": 780,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1080p scaled-calibration check",
+          "split": "held_out_1080",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true,
+          "resolution": "1920x1080"
+        },
+        {
+          "offset_s": 1140,
+          "scoreboard_present": false,
+          "state": "touchdown_banner_with_playcall",
+          "notes": "1080p scaled-calibration check",
+          "split": "hard_negative_1080",
+          "left_team_id": null,
+          "right_team_id": null,
+          "frame_exists": true,
+          "resolution": "1920x1080"
+        },
+        {
+          "offset_s": 1620,
+          "scoreboard_present": true,
+          "state": "normal_gameplay",
+          "notes": "1080p scaled-calibration check",
+          "split": "held_out_1080",
+          "left_team_id": "SF",
+          "right_team_id": "NYG",
+          "frame_exists": true,
+          "resolution": "1920x1080"
+        }
+      ]
+    }
+  ]
+}

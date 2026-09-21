@@ -10,6 +10,7 @@ from lsgc.persist.config import DATABASE_URL_ENV, TEST_DATABASE_URL_ENV, databas
 from lsgc.persist.errors import (
     ConfigError,
     ConflictingConfirmationError,
+    ConflictingMatchupError,
     PersistError,
     SchemaError,
     StaleConfirmationError,
@@ -19,13 +20,18 @@ from lsgc.persist.migrate import apply_migrations, connect
 from lsgc.persist.models import (
     PLATFORM_YOUTUBE,
     Game,
+    MatchupPersistResult,
     PersistOutcome,
     PersistResult,
     PlatformLifecycle,
     TrackingStatus,
 )
-from lsgc.persist.repository import PostgresGameRepository, event_payload_matches
-from lsgc.persist.tracker import DurableScoreTracker
+from lsgc.persist.repository import (
+    PostgresGameRepository,
+    event_payload_matches,
+    matchup_payload_matches,
+)
+from lsgc.persist.tracker import DurableMatchupTracker, DurableScoreTracker
 
 __all__ = [
     "DATABASE_URL_ENV",
@@ -33,8 +39,11 @@ __all__ = [
     "TEST_DATABASE_URL_ENV",
     "ConfigError",
     "ConflictingConfirmationError",
+    "ConflictingMatchupError",
+    "DurableMatchupTracker",
     "DurableScoreTracker",
     "Game",
+    "MatchupPersistResult",
     "PersistError",
     "PersistOutcome",
     "PersistResult",
@@ -48,4 +57,5 @@ __all__ = [
     "connect",
     "database_url",
     "event_payload_matches",
+    "matchup_payload_matches",
 ]
