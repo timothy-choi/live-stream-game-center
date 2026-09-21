@@ -6,6 +6,7 @@ team recognition, and no cross-frame state.
 
 Knows nothing of yt-dlp or FFmpeg, keeping the
 `YouTube -> resolver -> MediaSource -> decoder -> Frame -> vision` boundary.
+Score reading lives in `lsgc.score` and is gated on this detector.
 """
 
 from lsgc.vision.detector import (

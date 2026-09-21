@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-21 (Milestone 5 PASS)
+Last updated: 2026-09-21 (Milestone 6 PASS)
 
 ## Product
 
@@ -34,8 +34,9 @@ No microservices, no Redis/Celery/Kafka/Kubernetes. None of this exists yet.
 | M3 | Calibrated scoreboard-presence detection | **PASS, verified** |
 | M4 | Continuous frame acquisition for a single live broadcast | **PASS, verified** |
 | M5 | Cross-matchup scoreboard-detector validation | **PASS, verified** |
-| M6 | API + persistence | Not started |
-| M7 | Frontend scoreboard and game pages | Not started |
+| M6 | Numeric score reading foundation | **PASS, verified** |
+| M7 | API + persistence | Not started |
+| M8 | Frontend scoreboard and game pages | Not started |
 
 ## M0 status: PASS
 
@@ -152,7 +153,7 @@ on the **same** calibrated channel, without matchup-specific visual content.
 - **SCORE / IDENTITY GEOMETRY: ALIGNED** on the four games (readiness only; no OCR)
 
 Controlled live disruption/recovery remains unverified (M4 leftover). Score
-OCR is not started.
+reading is M6.
 
 ### Real cross-matchup evidence
 
@@ -176,13 +177,29 @@ positives +0.884…+0.997; combined negatives −0.280…+0.398; gap **+0.486**.
 
 M4 live labels were not reused.
 
+## M6 status: PASS
+
+Goal: read the numeric LEFT and RIGHT scores displayed by the calibrated
+Madden 27 Arcade scoreboard, as a per-frame **observation**. A single read is
+never treated as a confirmed score change.
+
+- **DETECTOR-GATED READER: VERIFIED** (`lsgc.score`) — ABSENT frames emit no
+  observation; PRESENT frames crop calibrated score regions
+- **HELD-OUT REAL VALIDATION: 222/222 SIDES EXACT** on 111 frames across five
+  recordings, 0 incorrect numeric reads, 0 unreadable
+- **1080p VIA 720p GLYPHS: VERIFIED** on four real 1920x1080 frames
+- **M3/M5 DETECTOR UNCHANGED: 40/40 and 99/99** still perfect
+
+Not trusted score state. No temporal confirmation, persistence, teams, clock,
+or API.
+
 ## Verified commands
 
 ```bash
 # setup
 python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
-# tests (offline, 320 passed)
+# tests (offline, 347 passed)
 ./.venv/bin/python -m pytest
 
 # archived: 5/5 frames, 1280x720, pts 0.000-4.000s, exit 0
@@ -723,6 +740,129 @@ python tools/m3_validate.py            # original 33/7 regression
 metadata only. A 1920x1080 subset of `UITXyHeI5KE` (t=40 present, t=100
 TOUCHDOWN absent, t=600 present) was correct via existing profile scaling.
 
+## M6: numeric score reading foundation
+
+`lsgc.score` consumes a frame plus a channel's calibration, digit glyphs, and
+an M3 detection result. It answers: what integers do the calibrated score
+crops *appear* to show? It does not create trusted score state.
+
+| Module | Purpose |
+| --- | --- |
+| `models.py` | `ScoreRead`, `RawScoreObservation`, `UnreadableReason` |
+| `preprocess.py` | calibrated crop, min-channel white isolation, 8x cubic, projection split |
+| `glyphs.py` | `DigitGlyphSet`: 18x28 grayscale patches for digits 0–9 |
+| `reader.py` | `ScoreReader`: per-crop ZNCC match with an unreadable outcome |
+| `pipeline.py` | `ScoreObservationPipeline`: M3 gate then independent L/R reads |
+| `cli.py` | `build-glyphs` / `show` / `read` |
+
+```bash
+# gated read (exit 3 if ABSENT)
+./.venv/bin/python -m lsgc.score read PROFILE.json GLYPHS.json FRAME.png \
+    --reference REFERENCE.json --expect-channel UC...
+
+python tools/m6_validate.py            # reuses gitignored M3/M5 frames
+python tools/m6_validate.py --1080
+```
+
+### Recognition method
+
+Compared on real score crops from this overlay:
+
+- **Tesseract 5.5.1** (digits whitelist, PSM 7/8) after 8x upscale: empty on
+  many single digits; 8/3 substitutions on `28`.
+- **Binary connected-components + templates**: fragmenting 3/5/6/8 under
+  bloom; 0 vs 6 confusion when templates were incomplete.
+- **Chosen: min-channel localisation + grayscale digit ZNCC.** White ink is
+  `min(B,G,R)`; boxes come from the column projection of an Otsu mask; the
+  recogniser matches contrast-stretched grayscale patches, not the binary
+  mask. Fits this scoreboard: 1–2 large rounded white numerals in a ~59x26
+  crop, same font across matchups.
+
+No full-frame OCR. No Tesseract/easyocr Python dependency. Runtime matching
+never looks up a timestamp or video id.
+
+Preprocessing stages that earned their keep on construction crops: min-channel
+(team colour drops out), 8x cubic (native crops are tiny), Otsu+close for
+localisation only, a 1px pad on the calibrated box. CLAHE, aggressive
+binarisation, and topology/hole counting were tried and dropped — they
+fragmented 3/5/8.
+
+### Confidence
+
+`ScoreRead.confidence` is the **minimum per-digit zero-normalised
+correlation** in [-1, 1]. `margin` is the minimum gap from the best glyph to
+the second-best. These are quality heuristics, not calibrated probabilities.
+
+`DEFAULT_MIN_SCORE = 0.80`, `DEFAULT_MIN_MARGIN = 0.08`. Held-out true digit
+matches scored ≥ 0.943 with gap ≥ 0.116. Forced ungated reads of menus and
+TOUCHDOWN/EXTRA POINT banners topped out around 0.66 and are rejected. The
+cut sits in that gap; it was not retuned per video.
+
+`MAX_VALUE = 199` and at most 3 digit boxes are OCR-garbage bounds, not
+football scoring rules. Unusual football values are accepted if the pixels
+match.
+
+### Detector gating
+
+M3 decides presence. ABSENT → `observe()` returns `None` and does not read
+scores. Ungated `ScoreReader.read_crop` on those same banner/menu crops
+returns `readable=False` at the 0.80 cut rather than inventing a value.
+
+### Glyph construction vs held-out validation
+
+Nine `hBblAZD-ApY` frames (offsets 40, 130, 140, 350, 660, 1020, 1200, 1560,
+1800) built the 0–9 glyphs and tuned split/preprocess. They are tagged
+`glyph_construction` in `tests/fixtures/m6_score_validation_set.json` and
+**excluded from held-out metrics**. Held-out: remaining labelled PRESENT
+frames of that recording, plus every labelled PRESENT frame of the four M5
+games. No M5 frame was used to build glyphs.
+
+Labels are the visible left/right integers, confirmed on the calibrated
+crops. Offsets are fixture metadata only.
+
+### Held-out results (1280x720, threshold 0.80 / 0.08)
+
+111 frames, 222 sides. **0 incorrect numeric reads.**
+
+| recording | video | matchup | frames | unique pairs | L exact/inc/unr | R exact/inc/unr | both-exact |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| giants | `hBblAZD-ApY` | 49ers @ Giants | 24 | 12 | 24/0/0 | 24/0/0 | 24 |
+| chargers | `G2kMfIDFNIQ` | Chargers @ 49ers | 23 | 15 | 23/0/0 | 23/0/0 | 23 |
+| packers | `A8Qd1dKHKUE` | 49ers @ Packers | 21 | 10 | 21/0/0 | 21/0/0 | 21 |
+| raiders | `wDbkLLJT4i8` | Raiders @ 49ers | 21 | 11 | 21/0/0 | 21/0/0 | 21 |
+| vikings | `UITXyHeI5KE` | Vikings @ 49ers | 22 | 14 | 22/0/0 | 22/0/0 | 22 |
+| **held-out** | | | **111** | | **111/0/0** | **111/0/0** | **111** |
+
+Side-level: exact 222, incorrect 0, unreadable 0, coverage 1.000, accuracy
+among readable 1.000. Frame-level: both-exact 111, partial 0, any-wrong 0,
+both-unreadable 0.
+
+Packers has fewer unique score *pairs* (10) because Q2 was a long 21–0
+stretch; the 21 labelled frames still cover 0 and 7–45, not copies of one
+score. Construction-set frames (leaked) also read 18/18 exact and are not
+counted above.
+
+Coverage includes 0, single-digit, double-digit, repeated digits (e.g. 21-21,
+7-7), PAT 6s, field-goal 3s, 13/17, 38/45/48/49/56/62, all four quarters in
+the Giants recording, and five team-colour panels (red, navy, green, black,
+purple).
+
+**These are fixture-validation metrics on one channel. They are not an
+estimate of production accuracy.**
+
+### 1080p check
+
+Existing 1920x1080 frames, 720p-derived profile scaling, same glyphs: Giants
+t=780 28-21, t=1620 56-28; Vikings t=40 0-0, t=600 7-28. All exact
+(conf ≥ 0.983).
+
+### Error analysis
+
+No held-out incorrect numeric read to inspect. Direct (ungated) reads of
+ABSENT crops at the operating point were unreadable; the highest banner
+correlation observed was 0.660 on a TOUCHDOWN left crop, below 0.80. M3
+gating skipped all of those frames.
+
 ## Verified technical findings
 
 - **yt-dlp version is load-bearing.** The preinstalled system yt-dlp
@@ -888,15 +1028,38 @@ delay.
 - **Raiders t=465 EXTRA POINT** scored combined +0.398 (a1 +0.619) because
   divider chrome remains while the banner covers the board. Min-of-anchors
   rejected it. Do not drop that combination rule.
-- **No OCR.** Score/identity boxes look geometrically correct; values were
-  not read.
+- **No OCR in M5.** Score/identity boxes look geometrically correct; values
+  were not read in that milestone (M6 reads scores).
 - **M4 unlabelled live frames were not added** to this set.
+
+### M6-specific limitations
+
+- **Observations are not trusted score state.** One readable frame is not a
+  confirmed score, not a score-change event, and not a game-final. Temporal
+  confirmation, persistence, and correction belong later.
+- **One channel, one overlay font.** Glyphs describe this PRISM Arcade score
+  face. A different capture setup needs its own glyphs.
+- **Held-out set is still a labelled convenience sample** (111 PRESENT
+  frames). Perfect exact-match here is not a production accuracy estimate.
+  Fade-in t=20 of the Giants recording was readable as 0-0; other transitions
+  that M3 still calls PRESENT are untested.
+- **No 3-digit score appeared** in the corpus. `MAX_VALUE=199` is an
+  OCR-garbage cap, unexercised above 62.
+- **Packers unique pairs are thinner** (10) because Q2 stayed 21-0 for a long
+  stretch. Extra frames of that game would mostly duplicate 21-0.
+- **Glyphs 3, 5, 9 were averaged from a single construction example each.**
+  Held-out 3/5/9 still matched; a different stroke weight is untested.
+- **Ungated reads of banners are rejected by the 0.80 cut**, but the
+  production path must keep using M3 gating. Do not drop the detector and
+  “just OCR the band.”
+- **No team, logo, quarter, or clock reading.**
 
 ## Next action
 
-M5 is complete for its intended scope (cross-matchup presence detection on this
-channel). **Score OCR / trusted score state is not started.** Controlled real
-disruption/recovery remains unverified from M4.
+M6 is complete for its intended scope (raw numeric score observations on this
+channel’s Arcade overlay). **Trusted score state / temporal confirmation is
+not started.** Controlled real disruption/recovery remains unverified from M4.
 
-Explicitly **not** implied by M5 PASS: OCR, digit or logo recognition, opponent
-identification, temporal score validation, persistence, API, frontend.
+Explicitly **not** implied by M6 PASS: trusted/current/official score,
+score-change validation, persistence, API, frontend, team/logo recognition,
+opponent resolution, quarter/clock OCR, schedule discovery.

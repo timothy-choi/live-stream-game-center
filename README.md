@@ -8,10 +8,10 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 5 complete (PASS) — cross-matchup scoreboard detection.**
-The M3 detector, unchanged, recognized the calibrated Arcade scoreboard on four
-additional same-channel matchups (Chargers, Packers, Raiders, Vikings). Score
-OCR, API, database, and frontend do not exist yet. See
+**Current milestone: 6 complete (PASS) — numeric score reading foundation.**
+The calibrated Arcade scoreboard’s left and right scores are read as raw
+per-frame observations. Those observations are **not** trusted game state.
+API, database, and frontend do not exist yet. See
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ## Requirements
@@ -139,9 +139,47 @@ on both. That conservatism is the point: a TOUCHDOWN banner sits in the same
 screen band and reuses the board's divider chrome, so a looser test would
 accept it and later feed unrelated graphics to score reading.
 
-Detection is per frame and per channel. There is no cross-frame smoothing, no
-OCR, and the threshold was measured against one channel's calibration rather
-than assumed to be universal.
+Detection is per frame and per channel. There is no cross-frame smoothing.
+The threshold was measured against one channel's calibration rather than
+assumed to be universal. Score reading is a separate step, gated on this
+result; detection does not use OCR.
+
+## Numeric score reading
+
+When the detector says the calibrated scoreboard is **PRESENT**, `lsgc.score`
+crops the calibrated left and right score regions and reads non-negative
+integers from those pixels. The result is a `RawScoreObservation`: what this
+frame *appears* to show, not a confirmed score and not trusted game state.
+
+```python
+from lsgc.calibration import load_profile
+from lsgc.score import ScoreObservationPipeline, ScoreReader, load_glyphs
+from lsgc.vision import ScoreboardDetector, load_reference
+
+profile = load_profile("profile.json", expect_channel=CHANNEL)
+reference = load_reference("reference.json", expect_channel=CHANNEL)
+glyphs = load_glyphs("glyphs.json", expect_channel=CHANNEL)
+
+pipeline = ScoreObservationPipeline(
+    ScoreboardDetector(profile, reference),
+    ScoreReader(glyphs),
+)
+observation = pipeline.observe_frame(frame)  # None when the board is ABSENT
+if observation is not None:
+    observation.left.value    # int or None
+    observation.right.readable
+```
+
+```bash
+# gated read of one frame (exit 3 if the scoreboard is absent)
+./.venv/bin/python -m lsgc.score read profile.json glyphs.json frame.png \
+    --reference reference.json --expect-channel UCz3q0f...
+```
+
+Left and right are independent. A side may be `readable=False, value=None`
+instead of inventing a number. Recognition is digit localisation plus
+zero-normalised correlation against 0–9 grayscale glyphs for this channel’s
+Arcade score font — not full-frame OCR, and not a timestamp-to-score table.
 
 ## Continuous live acquisition
 
@@ -181,6 +219,8 @@ python tools/m3_fixture.py capture     # needs YouTube; writes to artifacts/
 python tools/m3_validate.py --sweep
 python tools/m5_fixture.py capture     # needs YouTube; four M5 recordings
 python tools/m5_validate.py
+python tools/m6_validate.py            # score reading; reuses M3/M5 frames
+python tools/m6_validate.py --1080
 ```
 
 ## Layout
@@ -198,11 +238,14 @@ src/lsgc/
                 imagery only - never yt-dlp or FFmpeg.
   vision/       scoreboard-presence detection: reference evidence,
                 detector, diagnostic overlay, CLI
-tools/          developer scripts for M3/M5 labelled-set capture and scoring;
+  score/        numeric score reading: digit glyphs, crop preprocess,
+                ScoreReader, detector-gated RawScoreObservation. Observation
+                only — not trusted score state.
+tools/          developer scripts for M3/M5/M6 labelled-set capture and scoring;
                 need network, never run by pytest
 tests/
-  fixtures/     calibration profile, M3 reference, M3 and M5 labelled
-                validation metadata (no decoded frames)
+  fixtures/     calibration profile, M3 reference, M6 digit glyphs, M3/M5/M6
+                labelled validation metadata (no decoded frames)
 docs/implementation-status.md
 artifacts/      generated diagnostics, gitignored
 ```
