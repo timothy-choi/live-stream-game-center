@@ -12,6 +12,11 @@ venv/
 .ruff_cache/
 .mypy_cache/
 
+# Frontend
+node_modules/
+web/dist/
+web/coverage/
+
 # Generated media and diagnostic frames (never commit these).
 # The probe only ever writes under artifacts/; the extension rules below are a
 # backstop for media written elsewhere by accident. Note they are broad: when a
@@ -33,6 +38,7 @@ artifacts/
 .env.*
 *.env
 !.env.example
+!web/.env.example
 
 # Accidental local PostgreSQL data directories
 .pgdata/

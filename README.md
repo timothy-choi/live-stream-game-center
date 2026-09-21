@@ -8,11 +8,10 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 11 complete (PASS) — backend game API + real-time score
-delivery.** The API is a read-only product boundary over PostgreSQL. **API
-clients do not own tracking. Realtime connections do not own tracking.
-PostgreSQL durable state is authoritative.** Frontend, accounts, and owner
-correction APIs are not started. See
+**Current milestone: 12 complete (PASS) — ESPN-style web app foundation.**
+The browser is a consumer of the M11 API. **The browser does not perform
+score recognition. The browser does not start tracking. Closing the browser
+does not stop tracking.** See
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ## Requirements
@@ -25,6 +24,7 @@ correction APIs are not started. See
   OAuth access token). Never committed; see `.env.example`.
 - FastAPI for the M11 read-only API. Orchestrator stays off unless
   `LSGC_RUN_ORCHESTRATOR=true`.
+- Node.js 20+ for the M12 web app (`web/`).
 
 ## Setup
 
@@ -473,6 +473,60 @@ python tools/m11_validate.py            # in-memory snapshot/subscribe/reconnect
 python tools/m11_validate.py --postgres # same against LSGC_TEST_DATABASE_URL
 ```
 
+## Web app (M12)
+
+React + TypeScript + Vite in `web/`. The browser talks only to M11:
+
+- `GET /api/games`
+- `GET /api/games/{id}`
+- `GET /api/games/{id}/score-events`
+- `GET /api/games/{id}/events` (SSE)
+
+**The browser does not perform score recognition. The browser does not start
+tracking. Closing the browser does not stop tracking.**
+
+### Local startup
+
+```bash
+# API with CORS for Vite. For a durable DB, set DATABASE_URL and:
+#   LSGC_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173 \
+#   ./.venv/bin/python -m lsgc.api
+# Demo API (in-memory representative games, no YouTube, no tracking workers):
+./.venv/bin/python tools/m12_demo_api.py
+# Optional validation-only hook (not an M11 product route):
+#   POST /__demo/confirm-score?game_id=live&left=35&right=14
+
+# Frontend
+cd web
+cp .env.example .env.local   # VITE_API_BASE_URL=http://127.0.0.1:8000
+npm install
+npm run dev                  # http://localhost:5173
+npm test
+npm run build
+```
+
+Do not set backend CORS to `*`. Origins stay explicit.
+
+Routes: `/` scoreboard, `/games/:gameId` detail, unknown routes show not-found.
+
+Home uses backend list order (LIVE, UPCOMING, ENDED). Empty sections are
+omitted. Feed membership refreshes every `VITE_FEED_REFRESH_S` seconds
+(default 60) and on window focus — that is discovery presentation, not
+score tracking. Live cards subscribe per LIVE game via SSE and unsubscribe
+when the game leaves LIVE or the page unmounts. Upcoming/ended games are
+not kept on permanent SSE.
+
+Score semantics match M11: unconfirmed scores render as — (never fabricated
+0-0); ended games say ENDED / latest tracked score, never FINAL; sides are
+left/right, not home/away; title is never treated as confirmed identity.
+
+The YouTube embed is `https://www.youtube.com/embed/{external_broadcast_id}`
+only. Show/hide is local presentation. Hiding the player does not stop
+tracking.
+
+Reconnect: fetch durable snapshot, subscribe, apply `GAME_SNAPSHOT` after
+registration, ignore stale revisions, refetch on `RESYNC_REQUIRED`.
+
 ## Tests
 
 ```bash
@@ -535,9 +589,10 @@ src/lsgc/
                 in-process TrackingSupervisor. Control plane only.
   api/          read-only FastAPI + SSE. Product schemas, event hub, routes.
                 Never starts tracking.
+web/            React + TypeScript + Vite scoreboard. M11 consumer only.
 migrations/     versioned SQL
 docker-compose.postgres.yml
-tools/          developer scripts for M3–M11 labelled-set capture and scoring;
+tools/          developer scripts for M3–M12 labelled-set capture and scoring;
                 network/DB as noted, never run by default pytest
 tests/
   fixtures/     calibration profile, M3 reference, M6 digit glyphs, M10 logo

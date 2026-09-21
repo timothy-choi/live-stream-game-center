@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-21 (Milestone 11 PASS)
+Last updated: 2026-09-21 (Milestone 12 PASS)
 
 ## Product
 
@@ -26,7 +26,7 @@ No microservices, no Redis/Celery/Kafka/Kubernetes. PostgreSQL persistence
 exists (M8). YouTube broadcast discovery and local tracking orchestration
 exist (M9). Visual team identity, temporal matchup confirmation, and durable
 confirmed matchup persistence exist (M10). A read-only FastAPI + SSE delivery
-boundary exists (M11). Frontend does not.
+boundary exists (M11). A React scoreboard/detail consumer exists (M12).
 
 ## Milestone sequence
 
@@ -44,7 +44,7 @@ boundary exists (M11). Frontend does not.
 | M9 | YouTube broadcast discovery + tracking-session orchestration | **PASS, verified** |
 | M10 | Team / opponent identity + temporal matchup + durable matchup | **PASS, verified** |
 | M11 | API (REST / live updates) | **PASS, verified** |
-| M12 | Frontend scoreboard and game pages | Not started |
+| M12 | Frontend scoreboard and game pages | **PASS, verified** |
 
 ## M0 status: PASS
 
@@ -1612,22 +1612,48 @@ PostgreSQL.
 ### Limitations
 
 - No authentication. Local/development trust only. CORS is explicit origins.
-- No frontend, accounts, owner writes, tracking-enable API, final scores,
+- No accounts, owner writes, tracking-enable API, final scores,
   winners, standings, or notifications.
 - In-process hub is single-process. Multiple API processes would not share
   ephemeral notifications (durable catch-up still works).
 - SSE `sequence` resets on process restart; `cursor` and score revisions
   remain durable.
 
+## M12 status: PASS
+
+Goal: first viewer-facing scoreboard and game pages over M11 REST + SSE.
+
+- **HOME SCOREBOARD: VERIFIED** — live / upcoming / ended from `GET /api/games`
+- **GAME DETAIL: VERIFIED** — direct `/games/:id`, timeline, show/hide embed
+- **SSE UPDATES: VERIFIED** — home card 28-14 → 35-14 and detail 35-14 → 56-21
+  without reload against `tools/m12_demo_api.py`; stale/duplicate/RESYNC/unmount
+  covered by Vitest
+- **PRODUCTION BUILD: VERIFIED** — `npm run build` (tsc + vite)
+- **FRONTEND TESTS: VERIFIED** — 32 passed
+- **BROWSER VALIDATION: VERIFIED** — Vite `localhost:5173` + demo API
+  `127.0.0.1:8000`; desktop and ~390px layouts; keyboard-focusable links/buttons
+
+The browser is a consumer. Opening or closing pages does not start, stop, or
+own tracking. Embed URLs are only `https://www.youtube.com/embed/{id}`.
+
+Home SSE strategy: one EventSource per LIVE game; cleanup on unmount or when
+the game leaves LIVE. Feed membership polls every 60s and on focus.
+
+### Limitations
+
+- No accounts, owner tools, calibration UI, standings, or FINAL semantics.
+- Team logos are not loaded from the internet.
+- Demo API seed is not production data.
+- Controlled real disruption/recovery remains unverified from M4.
+
 ## Next action
 
-M11 is complete for its intended scope (read-only product API + SSE).
-**Frontend is not started.** Controlled real disruption/recovery remains
-unverified from M4.
+M12 is complete for its intended scope (scoreboard + detail + SSE + embed).
+**Accounts and owner tools are not started.** Controlled real
+disruption/recovery remains unverified from M4.
 
-Explicitly **not** implied by M11 PASS: official/final/corrected score,
-owner mutation APIs, authentication, frontend, title-derived matchup,
-32-team visual coverage, text-mode OCR, quarter/clock OCR, automatic
-new-game detection, football increment rules, multi-host locking,
-distributed event brokers.
+Explicitly **not** implied by M12 PASS: official/final/corrected score,
+owner mutation APIs, authentication, title-derived matchup, 32-team visual
+coverage, text-mode OCR, quarter/clock OCR, automatic new-game detection,
+football increment rules, multi-host locking, distributed event brokers.
 
