@@ -42,6 +42,56 @@ def local_source(local_clip: Path) -> MediaSource:
     )
 
 
+FIXTURE_DIR = Path(__file__).parent / "fixtures"
+M1_PROFILE_PATH = FIXTURE_DIR / "m1_fixture_profile.json"
+"""Profile calibrated from the M1 Madden diagnostic frames.
+
+Fixture data. Its channel, geometry, and logo-only identity describe one
+capture setup and are never product defaults.
+"""
+
+
+@pytest.fixture
+def valid_profile():
+    """A minimal well-formed profile, independent of the M1 fixture.
+
+    Deliberately synthetic so validation tests do not quietly depend on real
+    Madden geometry.
+    """
+    from datetime import UTC, datetime
+
+    from lsgc.calibration import CalibrationProfile, IdentityPresentation, Region
+
+    return CalibrationProfile(
+        profile_id="test-profile",
+        channel_id="UC_test_channel",
+        revision=1,
+        reference_width=1280,
+        reference_height=720,
+        scoreboard=Region(300, 60, 600, 80),
+        left_score=Region(400, 80, 40, 30),
+        right_score=Region(760, 80, 40, 30),
+        left_identity=Region(320, 70, 60, 60),
+        right_identity=Region(820, 70, 60, 60),
+        left_identity_presentation=IdentityPresentation.LOGO,
+        right_identity_presentation=IdentityPresentation.LOGO,
+        stable_anchors=(Region(500, 70, 20, 40),),
+        dynamic_ignore=(Region(600, 80, 50, 20),),
+        created_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+    )
+
+
+@pytest.fixture
+def synthetic_frame() -> "np.ndarray":  # noqa: F821
+    """A 1280x720 BGR image with structure, so overlay drawing is detectable."""
+    import numpy as np
+
+    image = np.zeros((720, 1280, 3), dtype=np.uint8)
+    image[:, :, 0] = 40
+    image[100:200, 200:600] = (80, 90, 100)
+    return image
+
+
 SEGMENT_DURATION_S = 2.0
 SEGMENT_COUNT = 10
 

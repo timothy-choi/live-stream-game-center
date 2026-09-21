@@ -30,8 +30,8 @@ No microservices, no Redis/Celery/Kafka/Kubernetes. None of this exists yet.
 | --- | --- | --- |
 | M0 | Repo + backend frame ingestion feasibility | **PASS, verified** |
 | M1 | Real Madden recording ingestion + recorded-video sampling | **PASS, verified** |
-| M2 | Continuous frame acquisition for a single live broadcast | Not started |
-| M3 | Channel-bound scoreboard calibration | Not started |
+| M2 | Channel-bound calibration foundation | **PASS, verified** |
+| M3 | Continuous frame acquisition for a single live broadcast | Not started |
 | M4 | Scoreboard region detection + score OCR observations | Not started |
 | M5 | Score validation and trusted persisted state | Not started |
 | M6 | API + persistence | Not started |
@@ -59,13 +59,27 @@ with a single playable URL.** Past-livestream VODs - which is what a recorded
 Madden broadcast is - are served exclusively as DASH segments, and M0's code
 handed the undecodable base URL to FFmpeg. See "DASH segment delivery" below.
 
+## M2 status: PASS
+
+Goal: define the channel-bound calibration data that a later detector will use
+to find the scoreboard, scores and team identities.
+
+- **CALIBRATION MODEL + VALIDATION: VERIFIED** (`lsgc.calibration`)
+- **JSON SERIALIZATION ROUND TRIP: VERIFIED**
+- **RESOLUTION SCALING 720p -> 1080p: VERIFIED** against a real 1080p frame
+- **M1 FIXTURE REPRESENTED: VERIFIED** (`tests/fixtures/m1_fixture_profile.json`)
+- **CHANNEL BINDING + REVISIONS: VERIFIED**
+
+No detection, matching, OCR or recognition — a profile records *where to look*,
+nothing about what is found there.
+
 ## Verified commands
 
 ```bash
 # setup
 python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
-# tests (offline, 41 passed)
+# tests (offline, 193 passed)
 ./.venv/bin/python -m pytest
 
 # archived: 5/5 frames, 1280x720, pts 0.000-4.000s, exit 0
@@ -200,6 +214,141 @@ tracked concurrently. The case for 1080p is the *small* elements - play clock
 and down & distance are only ~11-12px tall at 720p, roughly 17px at 1080p. If a
 later milestone needs those, revisit per-channel.
 
+## M2: channel-bound calibration
+
+`lsgc.calibration` consumes frame imagery only. It never imports yt-dlp or
+FFmpeg, so the `YouTube -> resolver -> MediaSource -> decoder -> Frame ->
+calibration` boundary still holds.
+
+| Module | Purpose |
+| --- | --- |
+| `geometry.py` | `Region`, the coordinate convention, resolution scaling |
+| `profile.py` | `IdentityPresentation`, `CalibrationProfile`, validation, channel binding, revisions |
+| `storage.py` | JSON serialization and schema-version handling |
+| `overlay.py` | Developer diagnostic overlay |
+| `cli.py` | `create` / `show` / `overlay` authoring commands |
+| `errors.py` | Calibration errors, deliberately *not* subclasses of `IngestionError` |
+
+```bash
+# author a profile (validates, prints a summary, writes JSON)
+./.venv/bin/python -m lsgc.calibration create --channel-id UC... --profile-id NAME \
+    --reference-size 1280x720 --scoreboard X,Y,W,H --left-score X,Y,W,H ... \
+    --left-identity-presentation logo --anchor X,Y,W,H --ignore X,Y,W,H --out PATH.json
+
+# inspect, and draw it over a representative frame (writes under artifacts/)
+./.venv/bin/python -m lsgc.calibration show PATH.json --expect-channel UC...
+./.venv/bin/python -m lsgc.calibration overlay PATH.json FRAME.png --expect-channel UC...
+```
+
+### Coordinate convention
+
+Origin top-left `(0, 0)`, x right, y down, whole pixels. A `Region` covers the
+**half-open** box `[x, x+width) x [y, y+height)`, so `right`/`bottom` are
+exclusive and a region maps exactly onto `image[y:y+h, x:x+w]`. Adjacent
+regions tile with no overlap and no one-pixel gap. M1's notes used inclusive
+ranges (`357..932`); the same box is now written `x=357, width=576`.
+
+Containment (`Region.contains`) allows touching edges. Invalid rectangles are
+unconstructible: `__post_init__` rejects non-integers, negative origins and
+non-positive sizes, so holding a `Region` means holding a valid one.
+
+### Geometry scaling rule
+
+Regions are stored against the reference frame size they were measured on. A
+profile is remapped with `profile.for_frame_size(w, h)`:
+
+- Aspect ratio must match within **0.5%** (`ASPECT_RATIO_TOLERANCE`), otherwise
+  the call raises rather than silently distorting. The tolerance is not zero
+  because YouTube serves 480p as 854x480, which is 16:9 only to within 0.08%;
+  4:3 (33% out) and mod-16 padded 1920x1088 (0.74% out) are still rejected.
+- Each **edge** is scaled and rounded independently, then converted back to
+  width/height. Scaling edges rather than origin-plus-size keeps regions that
+  share a boundary sharing it afterwards.
+- Rounding is **half-up** (`floor(v + 0.5)`), not Python's banker's `round`, so
+  results are predictable and directly assertable.
+- Results are clamped into the target frame, and no region can collapse to zero
+  pixels.
+
+Verified against a real 1920x1080 frame of the same broadcast: the 720p profile
+scaled up still lands on every element.
+
+### Channel binding
+
+A profile carries a stable platform `channel_id` (a YouTube `UC...` id, never a
+display name). `assert_channel()` raises `ChannelMismatchError` on a mismatch,
+and `load_profile(path, expect_channel=...)` makes the expected channel a
+**required** keyword argument. Tooling that must inspect a file without knowing
+its channel calls the explicitly named `load_profile_unchecked()`. The result is
+that runtime code cannot quietly treat one channel's profile as a global Madden
+default. There is no channel database yet; the id is supplied explicitly.
+
+### Schema version vs profile revision
+
+Two independent numbers:
+
+- **`schema_version`** (currently `1`) versions the *file format*. It changes
+  when this code changes the shape of the data. Loading an unknown version
+  fails with `ProfileSchemaError` before anything else is parsed, so a future
+  format is never misread as a malformed current one.
+- **`revision`** versions the *measurements*. It increments when a human
+  recalibrates a channel, via `next_revision()`. Profiles are frozen, so
+  revision 1 keeps its meaning when revision 2 is created, and both serialize
+  to independent files. A channel recalibrated ten times is still schema 1.
+
+`profile_id` identifies the calibration lineage and is stable across revisions.
+
+### Stable anchors and dynamic ignore regions
+
+**Stable anchors** are small regions expected to stay visually constant while
+the real scoreboard is displayed. They exist to separate "something occupies the
+scoreboard band" from "the calibrated scoreboard is present" — M1 found a
+TOUCHDOWN banner sitting exactly where the scoreboard goes, showing the scoring
+team's logo on both sides. At least one is required; all must lie inside the
+scoreboard bounds. M2 only stores them; matching is a later milestone.
+
+**Dynamic ignore regions** are areas expected to change, which must not be
+treated as stable evidence. They are generic rectangles — a profile does not
+label which is the clock and which is the down marker — and are only required
+to lie inside the frame, since a distraction outside the board is still worth
+ignoring. Scores and identities stay separately represented even when they also
+appear here.
+
+### M1 fixture validation — FIXTURE VALUES, NOT PRODUCT DEFAULTS
+
+`tests/fixtures/m1_fixture_profile.json`, calibrated from the M1 diagnostic
+frames of `hBblAZD-ApY` at **1280x720**, channel `UCz3q0f-dMPNIyQhntPTE7gQ`:
+
+| Element | Region (x, y, w, h) |
+| --- | --- |
+| scoreboard | 357, 65, 576, 65 |
+| left score | 470, 89, 59, 26 |
+| right score | 753, 89, 60, 26 |
+| left identity | 368, 68, 95, 59 |
+| right identity | 838, 78, 66, 49 |
+| anchor 0 (left panel divider) | 529, 70, 16, 56 |
+| anchor 1 (right panel divider) | 734, 72, 18, 52 |
+| 7 dynamic ignores | both scores, quarter, game clock, play clock, down & distance, ball-on |
+
+Both identity presentations are **LOGO**, because this broadcast's gameplay
+scoreboard shows logos and no usable team text. That is an observation about
+this capture setup, not a Madden-wide rule and not a default: the model
+supports `name`, `abbreviation`, `logo` and combinations, and presentation is a
+required argument with no default value.
+
+Regions were re-measured against the actual images rather than copied from M1's
+notes. Anchors were chosen empirically: comparing the 7-7 frame with the 49-28
+frame, each anchor changes by a mean of ~4.8/4.0 grey levels while the score
+regions change by ~91/107. An early anchor candidate was rejected because a test
+caught it overlapping the play-clock ignore region.
+
+**A calibration profile contains geometry and layout, never permanent opponent
+identity.** The fixture's teams, logos, colours and scores are not stored, and a
+test asserts the JSON mentions none of them.
+
+**Recorded-video timestamps are fixture metadata, not calibration or runtime
+input.** No source offset appears in `CalibrationProfile`; another broadcast
+will show its scoreboard at completely different times.
+
 ## Verified technical findings
 
 - **yt-dlp version is load-bearing.** The preinstalled system yt-dlp
@@ -265,7 +414,7 @@ delay.
 - **PO tokens / cookies may become necessary** on other networks. Not required
   here. If ever added, cookie jars must stay gitignored and out of commits.
 - Live PTS is not broadcast wall-clock (see above).
-- The probe samples once and exits. Long-lived capture is M2.
+- The probe samples once and exits. Long-lived capture is M3.
 
 ### M1-specific limitations
 
@@ -279,15 +428,33 @@ delay.
 - `-copyts` also changed what live sources report: the NASA stream now shows
   absolute HLS media-timeline values (e.g. 81211.962s) instead of 0. It is
   still **not** wall-clock broadcast time. Live timing is otherwise untouched
-  and remains an M2/M5 problem.
+  and remains an M3/M5 problem.
+
+### M2-specific limitations
+
+- **Calibration is authored by hand.** Coordinates are measured by a developer
+  and passed to the CLI. There is no assisted or automatic region proposal, and
+  no product UI.
+- **One profile exists**, for one channel. Nothing proves the model generalises
+  to a second capture setup until a second channel is calibrated.
+- **Anchors are stored, never matched.** Their usefulness as detection evidence
+  is asserted only by the frame-difference measurement above, which compares two
+  frames from a single broadcast.
+- **Scaling is proportional only.** No letterbox detection, cropping, rotation
+  or perspective correction. A feed whose shape differs must be recalibrated.
+- **No profile registry.** Profiles are files; nothing maps a channel to its
+  current profile or resolves which revision is active. That arrives with
+  persistence.
+- Only schema version 1 exists, so no migration path has been exercised.
 
 ## Next action
 
-M2: turn the one-shot probe into a supervised, long-running capture loop for a
+M3: turn the one-shot probe into a supervised, long-running capture loop for a
 single live broadcast — reconnect on segment gaps and stream restarts, sample
 at a fixed cadence for the length of a game, and record whether ingestion
 survives a multi-hour broadcast. Explicitly **not** yet: detection, OCR,
 persistence, API.
 
-M1 answered M0's open question: a representative Madden recording is now
-identified and measured.
+M1 answered M0's open question by identifying and measuring a representative
+Madden recording. M2 turned those measurements into a validated, versioned,
+channel-bound profile that a future detector can consume.

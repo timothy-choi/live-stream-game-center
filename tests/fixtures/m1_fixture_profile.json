@@ -1,0 +1,104 @@
+{
+  "schema_version": 1,
+  "profile_id": "madden27-arcade-prismlive",
+  "channel_id": "UCz3q0f-dMPNIyQhntPTE7gQ",
+  "revision": 1,
+  "created_at": "2026-09-21T05:06:22.386561+00:00",
+  "notes": "Calibrated from M1 diagnostic frames; gameplay scoreboard shows logos only.",
+  "reference_width": 1280,
+  "reference_height": 720,
+  "scoreboard": {
+    "x": 357,
+    "y": 65,
+    "width": 576,
+    "height": 65
+  },
+  "left_score": {
+    "x": 470,
+    "y": 89,
+    "width": 59,
+    "height": 26
+  },
+  "right_score": {
+    "x": 753,
+    "y": 89,
+    "width": 60,
+    "height": 26
+  },
+  "left_identity": {
+    "x": 368,
+    "y": 68,
+    "width": 95,
+    "height": 59
+  },
+  "right_identity": {
+    "x": 838,
+    "y": 78,
+    "width": 66,
+    "height": 49
+  },
+  "left_identity_presentation": [
+    "logo"
+  ],
+  "right_identity_presentation": [
+    "logo"
+  ],
+  "stable_anchors": [
+    {
+      "x": 529,
+      "y": 70,
+      "width": 16,
+      "height": 56
+    },
+    {
+      "x": 734,
+      "y": 72,
+      "width": 18,
+      "height": 52
+    }
+  ],
+  "dynamic_ignore": [
+    {
+      "x": 470,
+      "y": 89,
+      "width": 59,
+      "height": 26
+    },
+    {
+      "x": 753,
+      "y": 89,
+      "width": 60,
+      "height": 26
+    },
+    {
+      "x": 546,
+      "y": 84,
+      "width": 31,
+      "height": 17
+    },
+    {
+      "x": 618,
+      "y": 83,
+      "width": 43,
+      "height": 19
+    },
+    {
+      "x": 709,
+      "y": 84,
+      "width": 25,
+      "height": 17
+    },
+    {
+      "x": 586,
+      "y": 112,
+      "width": 63,
+      "height": 17
+    },
+    {
+      "x": 656,
+      "y": 112,
+      "width": 42,
+      "height": 17
+    }
+  ]
+}

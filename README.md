@@ -8,9 +8,10 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 1 — frame ingestion feasibility.** No scoreboard
-detection, OCR, API, database, or frontend exists yet. See
-[`docs/implementation-status.md`](docs/implementation-status.md).
+**Current milestone: 2 — channel-bound calibration foundation.** Frame
+ingestion works, and a calibration profile can record where a given channel
+draws its scoreboard. No scoreboard detection, OCR, API, database, or frontend
+exists yet. See [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ## Requirements
 
@@ -61,6 +62,45 @@ Sources served as DASH segments (YouTube serves past livestreams this way)
 are handled by fetching only the segments covering the requested offset, so
 seeking into a long recording stays cheap.
 
+## Calibration
+
+A calibration profile records **where** a specific channel draws its
+scoreboard: the board bounds, the two score regions, the two team-identity
+regions and what those identities show (`name`, `abbreviation`, `logo`, or a
+combination), plus stable anchor regions and dynamic ignore regions. It records
+no opponent identity and no source timestamps.
+
+Calibration is **per channel**. A profile is bound to a stable channel id and
+is never a global Madden default.
+
+```bash
+# author a profile: validates, prints a summary, writes JSON
+./.venv/bin/python -m lsgc.calibration create \
+    --channel-id UCz3q0f-dMPNIyQhntPTE7gQ --profile-id my-channel \
+    --reference-size 1280x720 \
+    --scoreboard 357,65,576,65 \
+    --left-score 470,89,59,26   --right-score 753,89,60,26 \
+    --left-identity 368,68,95,59 --right-identity 838,78,66,49 \
+    --left-identity-presentation logo --right-identity-presentation logo \
+    --anchor 529,70,16,56 --anchor 734,72,18,52 \
+    --ignore 546,84,31,17 \
+    --out profile.json
+
+# inspect, and draw the geometry over a representative frame
+./.venv/bin/python -m lsgc.calibration show profile.json --expect-channel UCz3q0f...
+./.venv/bin/python -m lsgc.calibration overlay profile.json frame.png
+# -> artifacts/calibration/my-channel_r1_1280x720.png
+```
+
+Regions are `x,y,width,height` in pixels from the top-left of the frame, with
+exclusive right/bottom edges. They are stored against the reference frame size
+they were measured on and rescaled deterministically to another frame of the
+same aspect ratio; a different aspect ratio is rejected rather than stretched.
+
+`schema_version` versions the file format; `revision` versions the
+measurements, and increments when a channel is recalibrated. Older revisions
+keep their meaning.
+
 ## Tests
 
 ```bash
@@ -78,8 +118,12 @@ src/lsgc/
   models.py     Frame and MediaSource: the contracts between layers
   resolver.py   YouTube URL -> playable media URL (the only yt-dlp consumer)
   decoder.py    media URL -> bounded stream of decoded frames
-  probe.py      CLI
+  probe.py      ingestion CLI
+  calibration/  channel-bound scoreboard geometry: model, validation,
+                JSON storage, overlay, authoring CLI. Consumes frame
+                imagery only - never yt-dlp or FFmpeg.
 tests/
+  fixtures/     the profile calibrated from the M1 Madden frames
 docs/implementation-status.md
 artifacts/      generated diagnostics, gitignored
 ```

@@ -1,7 +1,8 @@
-"""Live Stream Game Center - backend video ingestion.
+"""Live Stream Game Center - backend video ingestion and scoreboard calibration.
 
-Milestone 1 scope: prove that backend Python code can obtain and decode frames
-from YouTube without a browser. Nothing here knows about scoreboards or OCR.
+Ingestion (`lsgc.resolver`, `lsgc.decoder`) turns a YouTube URL into `Frame`
+objects without a browser. Calibration (`lsgc.calibration`) records where a
+given channel draws its scoreboard. Nothing here performs detection or OCR yet.
 """
 
 from lsgc.errors import DecodeError, IngestionError, SourceResolutionError
