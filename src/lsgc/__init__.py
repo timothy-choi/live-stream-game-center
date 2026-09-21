@@ -6,7 +6,9 @@ records where a channel draws its scoreboard; vision classifies presence.
 `lsgc.score` reads numeric scores from calibrated crops as raw observations.
 `lsgc.track` confirms those observations over time into trusted visual score
 state. `lsgc.persist` writes confirmed trusted state to PostgreSQL.
-Trusted is not official, final, or corrected.
+Trusted is not official, final, or corrected. `lsgc.broadcast` discovers
+YouTube broadcasts for configured channels and orchestrates local tracking
+workers without a viewer.
 """
 
 from lsgc.errors import DecodeError, IngestionError, SourceResolutionError

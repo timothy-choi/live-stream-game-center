@@ -12,7 +12,13 @@ from lsgc.persist.errors import (
     StaleConfirmationError,
     UnknownGameError,
 )
-from lsgc.persist.models import Game, PersistOutcome, PersistResult, TrackingStatus
+from lsgc.persist.models import (
+    Game,
+    PersistOutcome,
+    PersistResult,
+    PlatformLifecycle,
+    TrackingStatus,
+)
 from lsgc.persist.repository import event_payload_matches, validate_broadcast_id
 from lsgc.track.models import ConfirmedScoreChange
 
@@ -74,6 +80,87 @@ class InMemoryGameRepository:
     ) -> Game | None:
         game_id = self._by_identity.get((platform, external_broadcast_id.strip()))
         return None if game_id is None else self._games[game_id]
+
+    def list_games_for_channel(self, channel_id: str) -> tuple[Game, ...]:
+        games = [g for g in self._games.values() if g.channel_id == channel_id]
+        games.sort(
+            key=lambda g: (
+                g.scheduled_start_at is None,
+                g.scheduled_start_at or g.created_at,
+                g.created_at,
+                str(g.id),
+            )
+        )
+        return tuple(games)
+
+    def upsert_broadcast_metadata(
+        self,
+        *,
+        platform: str,
+        external_broadcast_id: str,
+        channel_id: str,
+        title: str | None,
+        platform_lifecycle: PlatformLifecycle,
+        scheduled_start_at: datetime | None,
+        actual_start_at: datetime | None,
+        actual_end_at: datetime | None,
+        synced_at: datetime,
+    ) -> Game:
+        game = self.create_or_get_game(
+            platform=platform,
+            external_broadcast_id=external_broadcast_id,
+            channel_id=channel_id,
+        )
+        now = datetime.now(tz=UTC)
+        updated = self._replace(
+            game,
+            title=title if title is not None else game.title,
+            platform_lifecycle=platform_lifecycle,
+            scheduled_start_at=(
+                scheduled_start_at
+                if scheduled_start_at is not None
+                else game.scheduled_start_at
+            ),
+            actual_start_at=(
+                actual_start_at if actual_start_at is not None else game.actual_start_at
+            ),
+            actual_end_at=(
+                actual_end_at if actual_end_at is not None else game.actual_end_at
+            ),
+            last_synced_at=synced_at,
+            channel_id=game.channel_id or channel_id,
+            updated_at=now,
+        )
+        self._games[game.id] = updated
+        return updated
+
+    def set_tracking_enabled(self, game_id: UUID, enabled: bool) -> Game:
+        game = self.get_game(game_id)
+        updated = self._replace(
+            game,
+            tracking_enabled=enabled,
+            updated_at=datetime.now(tz=UTC),
+        )
+        self._games[game_id] = updated
+        return updated
+
+    def record_worker_finished(
+        self,
+        game_id: UUID,
+        *,
+        error: str | None,
+        finished_at: datetime | None = None,
+    ) -> Game:
+        game = self.get_game(game_id)
+        now = datetime.now(tz=UTC)
+        updated = self._replace(
+            game,
+            last_tracking_error=error,
+            last_worker_finished_at=finished_at or now,
+            updated_at=now,
+        )
+        self._games[game_id] = updated
+        return updated
 
     def list_confirmed_changes(self, game_id: UUID) -> tuple[ConfirmedScoreChange, ...]:
         self.get_game(game_id)

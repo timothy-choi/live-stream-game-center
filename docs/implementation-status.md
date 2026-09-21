@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-21 (Milestone 8 PASS)
+Last updated: 2026-09-21 (Milestone 9 PASS)
 
 ## Product
 
@@ -23,7 +23,8 @@ Two constraints shape everything:
 
 Python API, Python vision/processing worker, PostgreSQL, lightweight frontend.
 No microservices, no Redis/Celery/Kafka/Kubernetes. PostgreSQL persistence
-exists (M8). REST, WebSockets, and frontend do not.
+exists (M8). YouTube broadcast discovery and local tracking orchestration
+exist (M9). REST, WebSockets, and frontend do not.
 
 ## Milestone sequence
 
@@ -38,8 +39,9 @@ exists (M8). REST, WebSockets, and frontend do not.
 | M6 | Numeric score reading foundation | **PASS, verified** |
 | M7 | Temporal score validation + trusted live score state | **PASS, verified** |
 | M8 | Durable game / trusted-score persistence + restart recovery | **PASS, verified** |
-| M9 | API (REST / live updates) | Not started |
-| M10 | Frontend scoreboard and game pages | Not started |
+| M9 | YouTube broadcast discovery + tracking-session orchestration | **PASS, verified** |
+| M10 | API (REST / live updates) | Not started |
+| M11 | Frontend scoreboard and game pages | Not started |
 
 ## M0 status: PASS
 
@@ -391,13 +393,113 @@ Candidate immediately after reload was **empty** on all five recordings.
 
 Not full-game tracking. Continuation used a new `Frame.index` origin.
 
+## M9 status: PASS
+
+Goal: discover YouTube broadcasts for an **explicit connected channel**, keep
+durable schedule/lifecycle state, and start **exactly one local tracking
+worker** per eligible LIVE broadcast without any viewer.
+
+- **CONTROL PLANE: VERIFIED OFFLINE** (`lsgc.broadcast`) — YouTube Data API v3
+  behind `BroadcastCatalog`; pytest uses a fake client
+- **EXACT VIDEO ID IDENTITY: VERIFIED** scheduled → live updates the same row
+- **ALREADY-LIVE / UNSCHEDULED-LIVE: VERIFIED OFFLINE**
+- **PAGINATION: VERIFIED OFFLINE** (`nextPageToken`, not `pageInfo.totalResults`)
+- **API FAILURE DOES NOT END BROADCASTS: VERIFIED OFFLINE**
+- **ELIGIBILITY + CHANNEL CALIBRATION: VERIFIED OFFLINE**
+- **SUPERVISOR 0-OR-1 WORKER: VERIFIED OFFLINE**
+- **NO VIEWER: VERIFIED OFFLINE** — `reconcile_once()` starts workers
+- **RESTART RECONCILIATION: VERIFIED OFFLINE** empty registry then one worker
+- **POSTGRESQL LIFECYCLE: VERIFIED** migration `002_broadcast_lifecycle.sql`
+- **REAL YOUTUBE DATA API: NOT RUN** — no API key/OAuth token was present in
+  this environment. Live tracking pipeline on a real stream was not re-run;
+  M4 already proved live acquisition.
+
+**YouTube ENDED / M4 acquisition ENDED ≠ GAME FINAL.**
+
+| Module | Purpose |
+| --- | --- |
+| `broadcast/youtube.py` | Data API v3 HTTP client + payload normalization |
+| `broadcast/sync.py` | Idempotent upsert by exact broadcast ID |
+| `broadcast/eligibility.py` | LIVE + tracking_enabled + channel calibration |
+| `broadcast/calibration.py` | Lookup by exact `channel_id` only |
+| `broadcast/supervisor.py` | In-process 0-or-1 worker registry |
+| `broadcast/worker.py` | M4 → M3/M6 → DurableScoreTracker |
+| `broadcast/orchestrator.py` | One testable reconcile iteration + cancellable loop |
+| `broadcast/cli.py` | `sync` / `run` |
+
+```bash
+./.venv/bin/python -m lsgc.broadcast sync
+./.venv/bin/python -m lsgc.broadcast run
+python tools/m9_validate.py   # optional; needs credentials; pytest never calls it
+```
+
+### Control plane vs data plane
+
+- **Control plane:** `search.list` (`eventType=live|upcoming`) + `videos.list`
+  (`snippet,liveStreamingDetails`) with an API key. If
+  `LSGC_YOUTUBE_ACCESS_TOKEN` is set, `liveBroadcasts.list mine=true`
+  `broadcastStatus=all` `broadcastType=all` is preferred (owner broadcasts,
+  including unscheduled/persistent). OAuth scopes documented by Google:
+  `youtube.readonly` / `youtube` / `youtube.force-ssl`.
+- **Data plane:** unchanged M4 `LiveFrameSession` on
+  `https://www.youtube.com/watch?v={id}`. yt-dlp is not the schedule database.
+
+Quota (from Google's quota calculator / method docs, not guessed):
+
+- `search.list`: own daily bucket, default **100 calls/day**, 1 per HTTP call
+  including each extra page.
+- `videos.list`: **1 unit** per call (up to 50 ids).
+- `liveBroadcasts.list`: consumes Data API quota; the liveBroadcasts.list
+  reference page does not state a unit cost, so none is claimed here.
+
+Default sync interval **1800s** with an API key (two `search.list` event types
+per cycle plus pagination). **120s** when an OAuth token is available.
+A missing search hit is refreshed with `videos.list` for known LIVE/UPCOMING
+ids; absence still does **not** infer ENDED.
+
+### Exact identity and lifecycle
+
+Durable key remains `(platform, external_broadcast_id)`. Migration 002 adds
+`title`, `platform_lifecycle`, schedule/actual timestamps, `last_synced_at`,
+`tracking_enabled`, worker error/finished fields. Trusted scores are never
+written by metadata sync.
+
+`tracking_enabled=false`: broadcast stays in the schedule; no automatic
+worker; disabling an active worker stops it without deleting history and
+without marking the broadcast ENDED.
+
+Calibration path: `{LSGC_CALIBRATION_DIR}/{channel_id}/profile.json` plus
+sibling `reference.json` and `glyphs.json`. Highest revision of a single
+`profile_id` wins. Distinct profile ids for one channel are ambiguous →
+NOT_READY. Foreign channel files are never used.
+
+Worker failure (M4 FAILED): backoff `15s … 300s` at the supervisor; M4's
+internal reconnect is not duplicated. M4 ENDED while YouTube still says LIVE
+does not freeze trusted score as FINAL; later reconcile may retry. YouTube
+ENDED stops the worker and sets `ACQUISITION_ENDED`.
+
+Process restart: in-memory registry is empty; durable LIVE + eligible rows
+get exactly one new worker; M8 restore still clears runtime ordering cursors.
+
+### Offline / PostgreSQL evidence
+
+Offline pytest after M9: **430 passed, 14 skipped** (postgres). Combined with
+`LSGC_TEST_DATABASE_URL`: **444 passed**. M9 orchestration cases are in
+`tests/test_broadcast_*.py`. PostgreSQL: scheduled→live same row, tracking
+enabled + ended lifecycle survive a new connection, trusted history untouched
+by metadata sync.
+
+Real Data API enumeration was **not** executed here (no credentials in the
+environment). Do not treat that gap as a live-ingestion failure; M4 already
+passed on real streams.
+
 ## Verified commands
 
 ```bash
 # setup
 python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
-# tests (offline + PostgreSQL when LSGC_TEST_DATABASE_URL is set; 404 passed)
+# tests (offline + PostgreSQL when LSGC_TEST_DATABASE_URL is set; 444 passed)
 ./.venv/bin/python -m pytest
 
 # archived: 5/5 frames, 1280x720, pts 0.000-4.000s, exit 0
@@ -1283,19 +1385,49 @@ delay.
   had evidence=1 must be observed again.
 - **One YouTube broadcast = one game.** M7 `reset()` does not delete SQL
   history; a new broadcast id is a new row.
-- **No REST, WebSockets, frontend, schedule sync, teams, or corrections.**
+- **No REST, WebSockets, frontend, teams, or corrections.**
 - **Compose credentials are local examples** in `.env.example`, not a
   production secret store.
 - Controlled real disruption/recovery remains unverified from M4.
 
+### M9-specific limitations
+
+- **No real YouTube Data API call was made in this M9 validation
+  environment** (no `LSGC_YOUTUBE_API_KEY` / access token). Discovery
+  semantics are implemented against the documented API and proven with
+  scripted payloads. Live metadata (currently-live listing) was not
+  observed on the development channel during M9.
+- **No real live tracking run** was attached to M9 orchestration. M4 already
+  proved LiveFrameSession on PRISM streams; M9 wires that session behind a
+  supervisor using fakes in pytest.
+- **API-key discovery uses `search.list`**, which Google documents as
+  search-index based and quota-scarce (100/day). Index delay is why a missing
+  hit is not treated as ENDED.
+- **OAuth `liveBroadcasts.list` is implemented but unexercised** without a
+  token. `broadcastType=all` is set because the default is `event` and would
+  miss persistent/unscheduled lives.
+- **Calibration is still files on disk**, not a durable registry/UI.
+  `{dir}/{channel_id}/` is the M9 lookup. Multiple distinct `profile_id`s for
+  one channel are refused rather than guessed.
+- **Single-process only.** The supervisor is an in-memory dict, not a
+  distributed lock. One `PostgresGameRepository` connection is serialized
+  with a lock for worker threads.
+- **No public API / no viewer UI.** `tracking_enabled` is persisted but has
+  no owner UI yet.
+- Completed/archived broadcasts are **not** polled every cycle (quota). ENDED
+  is recorded when `videos.list` / `liveBroadcasts.list` provides end
+  evidence, or when a discovered item is already ENDED.
+- **YouTube ENDED still does not mean Madden game-final.**
+
 ## Next action
 
-M8 is complete for its intended scope (durable confirmed visual score +
-restart recovery). **REST / live client updates are not started.** Controlled
-real disruption/recovery remains unverified from M4.
+M9 is complete for its intended scope (channel-scoped YouTube discovery +
+local tracking orchestration). **REST / live client updates are not
+started.** Controlled real disruption/recovery remains unverified from M4.
+Real Data API live listing was not run in this environment.
 
-Explicitly **not** implied by M8 PASS: official/final/corrected score, REST,
-WebSockets, frontend, YouTube schedule discovery, team/logo recognition,
-opponent identity, quarter/clock OCR, owner corrections, automatic new-game
-detection, football increment rules.
+Explicitly **not** implied by M9 PASS: official/final/corrected score, REST,
+WebSockets, frontend, team/logo recognition, opponent identity, quarter/clock
+OCR, owner corrections, automatic new-game detection, football increment
+rules, multi-host locking, OAuth onboarding UI.
 

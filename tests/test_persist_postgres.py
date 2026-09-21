@@ -33,6 +33,11 @@ def postgres_dsn() -> str:
     dsn = postgres_test_dsn()
     if not dsn:
         pytest.skip("LSGC_TEST_DATABASE_URL is not set")
+    try:
+        with connect(dsn) as conn:
+            conn.execute("SELECT 1")
+    except Exception:
+        pytest.skip("PostgreSQL test database is not reachable")
     return dsn
 
 
@@ -81,10 +86,11 @@ class TestMigrations:
                 first = apply_migrations(conn)
                 conn.commit()
                 assert 1 in first
+                assert 2 in first
                 again = apply_migrations(conn)
                 conn.commit()
                 assert again == []
-                assert applied_versions(conn) == [1]
+                assert applied_versions(conn) == [1, 2]
                 tables = conn.execute(
                     """
                     SELECT tablename FROM pg_tables

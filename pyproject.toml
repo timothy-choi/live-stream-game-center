@@ -33,6 +33,7 @@ lsgc-live-probe = "lsgc.live.cli:main"
 lsgc-score = "lsgc.score.cli:main"
 lsgc-track = "lsgc.track.cli:main"
 lsgc-persist = "lsgc.persist.cli:main"
+lsgc-broadcast = "lsgc.broadcast.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

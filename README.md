@@ -8,19 +8,22 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 8 complete (PASS) — durable trusted-score persistence.**
-Confirmed visual scores and their history survive process restart via
-PostgreSQL. **Persisted trusted score = temporally confirmed visual score.**
-It is not official, corrected, final, or winner-certified. REST, WebSockets,
-and frontend do not exist yet. See
+**Current milestone: 9 complete (PASS) — YouTube broadcast lifecycle
+orchestration.** The backend discovers scheduled/live/ended broadcasts for an
+explicit connected channel, upserts them by exact YouTube video ID, and starts
+at most one local tracking worker per eligible LIVE broadcast — with zero
+viewers. **YouTube ENDED / acquisition ENDED does not mean GAME FINAL.**
+REST, WebSockets, and frontend do not exist yet. See
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ## Requirements
 
 - Python 3.11+ (verified on 3.13)
 - FFmpeg and ffprobe on `PATH` (verified on 8.1.2)
-- PostgreSQL 16 for M8 persistence (optional for offline tests; required to
+- PostgreSQL 16 for persistence (optional for offline tests; required to
   recover confirmed scores after a restart)
+- YouTube Data API v3 credentials for M9 broadcast discovery (API key and/or
+  OAuth access token). Never committed; see `.env.example`.
 
 ## Setup
 
@@ -251,6 +254,53 @@ the uncommitted score.
 M7 `reset()` is not mapped to DELETE of persisted history. A new broadcast id
 is a new game.
 
+## Broadcast discovery and tracking orchestration
+
+M9 is the **control plane**. It uses the YouTube Data API v3 to discover
+broadcasts for explicitly configured channels. It does **not** scrape HTML and
+does **not** use yt-dlp playlists as a schedule database. yt-dlp remains the
+**data plane** inside M4 (`LiveFrameSession`) for playable media.
+
+Identity is the exact YouTube video/broadcast ID. A scheduled broadcast that
+goes live is the same durable game because the ID is unchanged. Titles and
+timestamps are mutable metadata only.
+
+Platform lifecycle (`UNKNOWN` / `UPCOMING` / `LIVE` / `ENDED`) is stored
+separately from acquisition/tracking (`TRACKING` / `ACQUISITION_ENDED`).
+**Neither is GAME FINAL.** Ending a YouTube broadcast or an M4 session does
+not choose a winner or certify a score.
+
+```bash
+# one-shot metadata sync (needs DATABASE_URL + YouTube credentials)
+./.venv/bin/python -m lsgc.broadcast sync
+
+# reconciliation loop: sync + ensure local tracking workers
+./.venv/bin/python -m lsgc.broadcast run
+```
+
+Configuration (placeholders in `.env.example`; never commit real values):
+
+| variable | purpose |
+| --- | --- |
+| `LSGC_YOUTUBE_CHANNEL_ID` or `LSGC_YOUTUBE_CHANNEL_IDS` | explicit connected channel(s); no hardcoded `UC…` in source |
+| `LSGC_YOUTUBE_API_KEY` | Data API key (`search.list` + `videos.list`) |
+| `LSGC_YOUTUBE_ACCESS_TOKEN` | optional OAuth; prefers `liveBroadcasts.list mine=true` |
+| `LSGC_CALIBRATION_DIR` | `{dir}/{channel_id}/profile.json` + `reference.json` + `glyphs.json` |
+| `LSGC_BROADCAST_SYNC_INTERVAL_S` | poll interval; default 1800s with an API key, 120s with OAuth |
+
+Tracking starts only when: the broadcast belongs to the configured channel,
+platform state is `LIVE`, `tracking_enabled` is true, that channel’s
+calibration exists, and no local worker already owns the ID. Missing
+calibration is `NOT_READY` — another channel’s profile is never substituted.
+
+The supervisor keeps **zero or one** in-process worker per broadcast ID.
+Each worker is `LiveFrameSession` → `ScoreObservationPipeline` →
+`DurableScoreTracker`. Opening a game page is not involved.
+
+```
+python tools/m9_validate.py   # optional real Data API check; never run by pytest
+```
+
 ## Continuous live acquisition
 
 `LiveFrameSession` keeps one YouTube **watch URL** open and yields sampled
@@ -295,6 +345,7 @@ python tools/m7_validate.py            # sparse labelled replay (no new video)
 python tools/m7_fixture.py capture     # needs YouTube; 2s clusters
 python tools/m7_validate.py --dense    # default live policy on those clusters
 python tools/m8_validate.py            # M7+M8 persist/restart; needs PostgreSQL
+python tools/m9_validate.py            # optional YouTube Data API metadata check
 ```
 
 ## Layout
@@ -320,9 +371,11 @@ src/lsgc/
                 restore() loads durable confirmed state; not a game-final.
   persist/      PostgreSQL games + append-only confirmed_score_changes,
                 DurableScoreTracker. No REST.
+  broadcast/    YouTube Data API discovery, schedule sync, eligibility,
+                in-process TrackingSupervisor. Control plane only.
 migrations/     versioned SQL
 docker-compose.postgres.yml
-tools/          developer scripts for M3–M8 labelled-set capture and scoring;
+tools/          developer scripts for M3–M9 labelled-set capture and scoring;
                 network/DB as noted, never run by default pytest
 tests/
   fixtures/     calibration profile, M3 reference, M6 digit glyphs, M3/M5/M6

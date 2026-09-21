@@ -5,6 +5,7 @@ M7 validator and M4/M6 contain no SQL.
 
 from __future__ import annotations
 
+import threading
 from datetime import UTC, datetime
 from uuid import UUID, uuid4
 
@@ -19,7 +20,7 @@ from lsgc.persist.errors import (
     StaleConfirmationError,
     UnknownGameError,
 )
-from lsgc.persist.models import Game, PersistOutcome, PersistResult, TrackingStatus
+from lsgc.persist.models import Game, PersistOutcome, PersistResult, PlatformLifecycle, TrackingStatus
 from lsgc.track.models import ConfirmedScoreChange
 
 _GAME_COLUMNS = """
@@ -27,7 +28,10 @@ _GAME_COLUMNS = """
     trusted_left_score, trusted_right_score, score_revision,
     last_confirmed_at, last_confirmed_timestamp_s,
     last_confirmed_frame_index, last_confirmed_epoch,
-    created_at, updated_at
+    created_at, updated_at,
+    title, platform_lifecycle, scheduled_start_at, actual_start_at,
+    actual_end_at, last_synced_at, tracking_enabled,
+    last_tracking_error, last_worker_finished_at
 """
 
 
@@ -62,12 +66,38 @@ def validate_broadcast_id(platform: str, external_broadcast_id: str) -> None:
         )
 
 
+def _serialized(method):
+    """One-at-a-time connection use. Outermost call commits visibility."""
+
+    def wrapped(self, *args, **kwargs):
+        with self._lock:
+            self._depth += 1
+            try:
+                return method(self, *args, **kwargs)
+            finally:
+                self._depth -= 1
+                if (
+                    self._depth == 0
+                    and not self._conn.closed
+                    and not self._conn.autocommit
+                ):
+                    try:
+                        self._conn.commit()
+                    except Exception:
+                        self._conn.rollback()
+
+    return wrapped
+
+
 class PostgresGameRepository:
     """SQL for games + confirmed_score_changes. One connection, caller-owned."""
 
     def __init__(self, conn: psycopg.Connection) -> None:
         self._conn = conn
+        self._lock = threading.RLock()
+        self._depth = 0
 
+    @_serialized
     def create_or_get_game(
         self,
         *,
@@ -120,6 +150,7 @@ class PostgresGameRepository:
             raise PersistError("failed to create or load game")
         return game
 
+    @_serialized
     def get_game(self, game_id: UUID) -> Game:
         row = self._conn.execute(
             f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s",
@@ -129,6 +160,7 @@ class PostgresGameRepository:
             raise UnknownGameError(f"game {game_id} not found")
         return _game_from_row(row)
 
+    @_serialized
     def get_game_by_external_id(
         self, platform: str, external_broadcast_id: str
     ) -> Game | None:
@@ -141,6 +173,123 @@ class PostgresGameRepository:
         ).fetchone()
         return None if row is None else _game_from_row(row)
 
+    @_serialized
+    def list_games_for_channel(self, channel_id: str) -> tuple[Game, ...]:
+        rows = self._conn.execute(
+            f"""
+            SELECT {_GAME_COLUMNS} FROM games
+             WHERE channel_id = %s
+             ORDER BY scheduled_start_at NULLS LAST, created_at, id
+            """,
+            (channel_id,),
+        ).fetchall()
+        return tuple(_game_from_row(row) for row in rows)
+
+    @_serialized
+    def upsert_broadcast_metadata(
+        self,
+        *,
+        platform: str,
+        external_broadcast_id: str,
+        channel_id: str,
+        title: str | None,
+        platform_lifecycle: PlatformLifecycle,
+        scheduled_start_at: datetime | None,
+        actual_start_at: datetime | None,
+        actual_end_at: datetime | None,
+        synced_at: datetime,
+    ) -> Game:
+        """Create or update schedule/lifecycle fields. Never writes trusted scores."""
+        validate_broadcast_id(platform, external_broadcast_id)
+        identity = external_broadcast_id.strip()
+        now = datetime.now(tz=UTC)
+        with self._conn.transaction():
+            self.create_or_get_game(
+                platform=platform,
+                external_broadcast_id=identity,
+                channel_id=channel_id,
+            )
+            self._conn.execute(
+                """
+                UPDATE games SET
+                    title = COALESCE(%s, title),
+                    platform_lifecycle = %s,
+                    scheduled_start_at = COALESCE(%s, scheduled_start_at),
+                    actual_start_at = COALESCE(%s, actual_start_at),
+                    actual_end_at = COALESCE(%s, actual_end_at),
+                    last_synced_at = %s,
+                    channel_id = COALESCE(channel_id, %s),
+                    updated_at = %s
+                 WHERE platform = %s AND external_broadcast_id = %s
+                """,
+                (
+                    title,
+                    platform_lifecycle.value,
+                    scheduled_start_at,
+                    actual_start_at,
+                    actual_end_at,
+                    synced_at,
+                    channel_id,
+                    now,
+                    platform,
+                    identity,
+                ),
+            )
+        game = self.get_game_by_external_id(platform, identity)
+        if game is None:
+            raise PersistError("failed to upsert broadcast metadata")
+        return game
+
+    @_serialized
+    def set_tracking_enabled(self, game_id: UUID, enabled: bool) -> Game:
+        now = datetime.now(tz=UTC)
+        with self._conn.transaction():
+            row = self._conn.execute(
+                f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s FOR UPDATE",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                raise UnknownGameError(f"game {game_id} not found")
+            self._conn.execute(
+                """
+                UPDATE games
+                   SET tracking_enabled = %s, updated_at = %s
+                 WHERE id = %s
+                """,
+                (enabled, now, game_id),
+            )
+        return self.get_game(game_id)
+
+    @_serialized
+    def record_worker_finished(
+        self,
+        game_id: UUID,
+        *,
+        error: str | None,
+        finished_at: datetime | None = None,
+    ) -> Game:
+        now = datetime.now(tz=UTC)
+        finished = finished_at or now
+        with self._conn.transaction():
+            row = self._conn.execute(
+                f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s FOR UPDATE",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                raise UnknownGameError(f"game {game_id} not found")
+            self._conn.execute(
+                """
+                UPDATE games
+                   SET last_tracking_error = %s,
+                       last_worker_finished_at = %s,
+                       updated_at = %s
+                 WHERE id = %s
+                """,
+                (error, finished, now, game_id),
+            )
+        return self.get_game(game_id)
+
+    @_serialized
     def list_confirmed_changes(self, game_id: UUID) -> tuple[ConfirmedScoreChange, ...]:
         rows = self._conn.execute(
             """
@@ -156,6 +305,7 @@ class PostgresGameRepository:
         ).fetchall()
         return tuple(_change_from_row(row) for row in rows)
 
+    @_serialized
     def persist_confirmation(
         self, game_id: UUID, change: ConfirmedScoreChange
     ) -> PersistResult:
@@ -266,6 +416,7 @@ class PostgresGameRepository:
         game = self.get_game(game_id)
         return PersistResult(PersistOutcome.APPLIED, game, change)
 
+    @_serialized
     def mark_acquisition_ended(self, game_id: UUID) -> Game:
         now = datetime.now(tz=UTC)
         with self._conn.transaction():
@@ -285,6 +436,7 @@ class PostgresGameRepository:
             )
             return self.get_game(game_id)
 
+    @_serialized
     def assert_current_matches_history(self, game_id: UUID) -> None:
         """Test/recovery invariant. Not called on every frame."""
         game = self.get_game(game_id)
@@ -321,6 +473,10 @@ class PostgresGameRepository:
 
 
 def _game_from_row(row: dict_row | dict) -> Game:
+    tracking_enabled = row.get("tracking_enabled")
+    if tracking_enabled is None:
+        tracking_enabled = True
+    lifecycle_raw = row.get("platform_lifecycle") or PlatformLifecycle.UNKNOWN.value
     return Game(
         id=row["id"],
         platform=row["platform"],
@@ -336,6 +492,15 @@ def _game_from_row(row: dict_row | dict) -> Game:
         last_confirmed_epoch=row["last_confirmed_epoch"],
         created_at=row["created_at"],
         updated_at=row["updated_at"],
+        title=row.get("title"),
+        platform_lifecycle=PlatformLifecycle(lifecycle_raw),
+        scheduled_start_at=row.get("scheduled_start_at"),
+        actual_start_at=row.get("actual_start_at"),
+        actual_end_at=row.get("actual_end_at"),
+        last_synced_at=row.get("last_synced_at"),
+        tracking_enabled=bool(tracking_enabled),
+        last_tracking_error=row.get("last_tracking_error"),
+        last_worker_finished_at=row.get("last_worker_finished_at"),
     )
 
 

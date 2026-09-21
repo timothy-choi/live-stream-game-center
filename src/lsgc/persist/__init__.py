@@ -21,6 +21,7 @@ from lsgc.persist.models import (
     Game,
     PersistOutcome,
     PersistResult,
+    PlatformLifecycle,
     TrackingStatus,
 )
 from lsgc.persist.repository import PostgresGameRepository, event_payload_matches
@@ -37,6 +38,7 @@ __all__ = [
     "PersistError",
     "PersistOutcome",
     "PersistResult",
+    "PlatformLifecycle",
     "PostgresGameRepository",
     "SchemaError",
     "StaleConfirmationError",

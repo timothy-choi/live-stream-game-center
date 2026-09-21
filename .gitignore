@@ -50,6 +50,8 @@ pgdata/
 credentials.json
 client_secret*.json
 token.json
+youtube-token*.json
+*oauth*token*.json
 *service-account*.json
 secrets.json
 secrets.y*ml

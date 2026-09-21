@@ -26,6 +26,15 @@ class TrackingStatus(str, Enum):
     """M4 acquisition ended. Trusted score is frozen. Not FINAL."""
 
 
+class PlatformLifecycle(str, Enum):
+    """YouTube/platform broadcast lifecycle. Not an acquisition state and not FINAL."""
+
+    UNKNOWN = "UNKNOWN"
+    UPCOMING = "UPCOMING"
+    LIVE = "LIVE"
+    ENDED = "ENDED"
+
+
 class PersistOutcome(str, Enum):
     APPLIED = "applied"
     IDEMPOTENT = "idempotent"
@@ -49,6 +58,15 @@ class Game:
     last_confirmed_epoch: int | None
     created_at: datetime
     updated_at: datetime
+    title: str | None = None
+    platform_lifecycle: PlatformLifecycle = PlatformLifecycle.UNKNOWN
+    scheduled_start_at: datetime | None = None
+    actual_start_at: datetime | None = None
+    actual_end_at: datetime | None = None
+    last_synced_at: datetime | None = None
+    tracking_enabled: bool = True
+    last_tracking_error: str | None = None
+    last_worker_finished_at: datetime | None = None
 
     @property
     def pair(self) -> tuple[int, int] | None:
