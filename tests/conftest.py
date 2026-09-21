@@ -92,6 +92,87 @@ def synthetic_frame() -> "np.ndarray":  # noqa: F821
     return image
 
 
+M3_MANIFEST_PATH = FIXTURE_DIR / "m3_validation_set.json"
+M3_REFERENCE_PATH = FIXTURE_DIR / "m3_reference.json"
+"""Labelled samples and reference evidence from the M1 Madden recording.
+
+Metadata only. The decoded frames they describe stay under gitignored
+artifacts, so tests that need imagery synthesise it instead.
+"""
+
+
+@pytest.fixture
+def detection_profile():
+    """A synthetic two-anchor profile, independent of the Madden fixture."""
+    from datetime import UTC, datetime
+
+    from lsgc.calibration import CalibrationProfile, IdentityPresentation, Region
+
+    return CalibrationProfile(
+        profile_id="detect-test",
+        channel_id="UC_detect_channel",
+        revision=1,
+        reference_width=640,
+        reference_height=360,
+        scoreboard=Region(100, 40, 440, 60),
+        left_score=Region(180, 55, 40, 30),
+        right_score=Region(420, 55, 40, 30),
+        left_identity=Region(110, 45, 60, 50),
+        right_identity=Region(470, 45, 60, 50),
+        left_identity_presentation=IdentityPresentation.LOGO,
+        right_identity_presentation=IdentityPresentation.LOGO,
+        stable_anchors=(Region(240, 48, 24, 44), Region(370, 48, 24, 44)),
+        dynamic_ignore=(Region(300, 55, 40, 30),),
+        created_at=datetime(2026, 1, 1, 12, 0, tzinfo=UTC),
+    )
+
+
+def _draw_anchor_structure(image, region, flip: bool = False) -> None:
+    """Put a deterministic, high-contrast pattern inside a region.
+
+    Detection compares structure, so a fixture image needs real structure:
+    a flat patch correlates with nothing and would make every test score zero.
+    """
+    import cv2
+
+    for step in range(0, region.height, 6):
+        y = region.y + step
+        offset = (region.height - step) if flip else step
+        x = region.x + (offset % max(1, region.width))
+        cv2.line(image, (region.x, y), (min(x, region.right - 1), y), (255, 255, 255), 2)
+
+
+@pytest.fixture
+def scoreboard_image(detection_profile):
+    """A frame whose anchors carry the structure a reference is built from."""
+    import numpy as np
+
+    image = np.full((360, 640, 3), 30, dtype=np.uint8)
+    image[40:100, 100:540] = (70, 60, 50)
+    for anchor in detection_profile.stable_anchors:
+        _draw_anchor_structure(image, anchor)
+    return image
+
+
+@pytest.fixture
+def imposter_image(detection_profile):
+    """Same size and band, different structure: the synthetic hard negative."""
+    import numpy as np
+
+    image = np.full((360, 640, 3), 30, dtype=np.uint8)
+    image[40:100, 100:540] = (50, 60, 70)
+    for anchor in detection_profile.stable_anchors:
+        _draw_anchor_structure(image, anchor, flip=True)
+    return image
+
+
+@pytest.fixture
+def scoreboard_reference(detection_profile, scoreboard_image):
+    from lsgc.vision import build_reference
+
+    return build_reference([scoreboard_image], detection_profile)
+
+
 SEGMENT_DURATION_S = 2.0
 SEGMENT_COUNT = 10
 

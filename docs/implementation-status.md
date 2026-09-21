@@ -31,9 +31,9 @@ No microservices, no Redis/Celery/Kafka/Kubernetes. None of this exists yet.
 | M0 | Repo + backend frame ingestion feasibility | **PASS, verified** |
 | M1 | Real Madden recording ingestion + recorded-video sampling | **PASS, verified** |
 | M2 | Channel-bound calibration foundation | **PASS, verified** |
-| M3 | Continuous frame acquisition for a single live broadcast | Not started |
-| M4 | Scoreboard region detection + score OCR observations | Not started |
-| M5 | Score validation and trusted persisted state | Not started |
+| M3 | Calibrated scoreboard-presence detection | **PASS, verified** |
+| M4 | Continuous frame acquisition for a single live broadcast | Not started |
+| M5 | Score OCR observations + trusted persisted score state | Not started |
 | M6 | API + persistence | Not started |
 | M7 | Frontend scoreboard and game pages | Not started |
 
@@ -73,13 +73,26 @@ to find the scoreboard, scores and team identities.
 No detection, matching, OCR or recognition — a profile records *where to look*,
 nothing about what is found there.
 
+## M3 status: PASS
+
+Goal: decide from a single frame whether a channel's calibrated scoreboard is
+actually visible, so later milestones never read scores off unrelated graphics.
+
+- **DETECTOR: VERIFIED** (`lsgc.vision`) — 40/40 correct on the labelled set
+- **M2 ANCHORS REVALIDATED: BOTH RETAINED** on 40 samples, not the 2 M2 used
+- **HARD NEGATIVES REJECTED: VERIFIED** (3 TOUCHDOWN banners, 1 EXTRA POINT)
+- **1080p VIA 720p REFERENCE: VERIFIED** on real 1920x1080 frames, no retuning
+- **THRESHOLD: MEASURED**, not guessed — any cut in (-0.08, 0.83) is perfect here
+
+Single-frame only. No temporal debouncing, no OCR, no team or score reading.
+
 ## Verified commands
 
 ```bash
 # setup
 python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
-# tests (offline, 193 passed)
+# tests (offline, 283 passed)
 ./.venv/bin/python -m pytest
 
 # archived: 5/5 frames, 1280x720, pts 0.000-4.000s, exit 0
@@ -349,6 +362,183 @@ test asserts the JSON mentions none of them.
 input.** No source offset appears in `CalibrationProfile`; another broadcast
 will show its scoreboard at completely different times.
 
+## M3: calibrated scoreboard-presence detection
+
+`lsgc.vision` consumes frame imagery plus a channel's calibration and answers
+one question: is this channel's calibrated scoreboard on screen? It imports no
+yt-dlp and no FFmpeg, so the ingestion boundary still holds.
+
+| Module | Purpose |
+| --- | --- |
+| `reference.py` | `ScoreboardReference`: what normal stable structure looks like, plus JSON storage |
+| `detector.py` | `ScoreboardDetector`, `DetectionResult`, `AnchorEvidence`, the threshold |
+| `overlay.py` | Per-anchor diagnostic overlay |
+| `cli.py` | `build-reference` / `show` / `detect` |
+| `errors.py` | `VisionError`, `ReferenceSchemaError`, `ReferenceMismatchError` |
+
+```bash
+# build reference evidence from frames showing the normal scoreboard
+./.venv/bin/python -m lsgc.vision build-reference PROFILE.json FRAME1.png FRAME2.png \
+    --expect-channel UC... --out REFERENCE.json
+
+# check one frame; exit 0 present, 3 absent, 2 error
+./.venv/bin/python -m lsgc.vision detect PROFILE.json REFERENCE.json FRAME.png \
+    --expect-channel UC... --overlay
+
+# rebuild the validation frames (needs YouTube) and score the whole set
+python tools/m3_fixture.py capture
+python tools/m3_validate.py --sweep
+```
+
+### Validation set — FIXTURE METADATA ONLY
+
+`tests/fixtures/m3_validation_set.json` holds **40 manually labelled samples**
+from `hBblAZD-ApY`, established by inspecting each decoded frame's scoreboard
+band, not by any automated rule. 76 frames were surveyed with bounded seeking
+and curated down; the whole recording was never downloaded.
+
+- **33 positives**: quarters 1-4; scores 0-0 through 62-35; kickoff, PAT,
+  1st & 10, 2nd & Goal, 4th & Inches; with and without play-call menus;
+  midfield and endzone backgrounds; both possession states. Includes one
+  deliberately hard positive, the board mid fade-in at t=20.
+- **7 negatives**: 3 pregame team-select menus and 4 hard negatives.
+- **4 hard negatives**: three TOUCHDOWN banners (two blue/NY, one red/SF) and
+  one EXTRA POINT banner. All occupy the scoreboard band and reuse the board's
+  own divider chrome, so "something is there" would accept every one of them.
+
+Categories the spec asked for that **do not exist** in this recording: replay,
+halftime, quarter-break graphic and postgame. Quarters transition seamlessly
+(t=550 shows 1st 0:06, t=565 shows 2nd 5:00) and the addressable fragments end
+mid-play. Absence of a category is a property of this fixture, not evidence the
+detector handles it.
+
+The two frames the reference is built from (t=240, t=1500) are **excluded** from
+the validation set, so the detector is never scored on the frames it was
+derived from. A test enforces that.
+
+Offsets identify frames for regression. They are not detector inputs and not
+part of any `CalibrationProfile`.
+
+### M2 anchor reevaluation — BOTH RETAINED
+
+M2 chose its two anchors by differencing only two positive frames. Re-measured
+across all 40 labelled samples (zero-normalised correlation against the
+reference, lower of the intensity and structure measures):
+
+| Anchor | Region | Positives (n=33) | Negatives (n=7) | Verdict |
+| --- | --- | --- | --- | --- |
+| 0, left panel divider | x=529 y=70 16x56 | 0.883..0.999, median 0.987 | -0.138..0.173 | **retained unchanged** |
+| 1, right panel divider | x=734 y=72 18x52 | 0.825..0.999, median 0.996 | -0.107..0.230 | **retained unchanged** |
+
+Neither anchor is contaminated by dynamic content: the weakest positives are
+0.825 and 0.883, far above the strongest negatives at 0.230 and 0.173. Neither
+was adjusted, because the evidence gives no reason to — and adjusting an anchor
+that already separates cleanly would only risk overfitting to 40 frames. Two
+anchors suffice; a third was not added because the combined gap is already
+0.908 and every extra anchor is another thing to invalidate on recalibration.
+
+These anchors belong to this channel's profile. They are not universal Madden
+anchors.
+
+### Reference evidence representation
+
+`CalibrationProfile` says **where** to look; `ScoreboardReference` says **what**
+it should look like there. They are separate objects with separate schema
+versions.
+
+A reference stores, per anchor, a **12x24 uint8 grayscale patch** averaged over
+the representative frames, plus the anchor rectangle it was sampled from. Size
+chosen by measurement: separation stops improving past roughly this grid
+(12x24 gives a 0.908 gap, 16x32 gives 0.914 for nearly twice the data). Two
+anchors is 576 integers, small enough to live in reviewable JSON next to the
+profile, so **no binary crops are stored and no Madden imagery is committed**.
+Averaging several frames keeps one frame's transient content from being baked
+in as required structure.
+
+The patches describe panel-divider chrome. They encode no team, score, clock,
+colour or timestamp, and a test asserts the committed JSON mentions none.
+
+Durable storage later: a profile and its reference are two small JSON documents
+per channel revision, so whatever backs calibration in the persistence
+milestone needs a blob or JSON column of a few tens of KB per revision, keyed by
+channel and revision. Nothing here requires object storage.
+
+### Detection method
+
+Per anchor, the frame's crop is put on the descriptor grid and compared with the
+stored patch two ways:
+
+- **intensity similarity** — zero-normalised cross-correlation of grayscale,
+  which ignores overall brightness and contrast;
+- **structure similarity** — the same correlation on Sobel gradient magnitude,
+  which responds to edge layout and, being unsigned, survives the panel behind
+  a divider changing shade.
+
+An anchor scores the lower of the two; the frame scores the lowest anchor. Taking
+minima throughout means a frame is accepted only when **every** anchor matches on
+**both** measures. That is deliberately conservative because a false positive
+would later feed unrelated graphics to score reading.
+
+No template matching over a search window, no feature matching, no ML. The
+calibrated approach separates the set perfectly, so a model would be
+unjustified. Nothing reads text, logos, scores or timestamps.
+
+### Confidence and threshold
+
+`DetectionResult.score` is the lowest anchor correlation, in [-1, 1], reported
+alongside `threshold` and `margin`. Measured on the 40 samples at 1280x720:
+
+| | n | min | median | max |
+| --- | --- | --- | --- | --- |
+| positives | 33 | +0.831 | +0.991 | +0.999 |
+| negatives | 7 | -0.181 | -0.119 | **-0.077** |
+
+Closest positive t=960 (+0.831, normal gameplay); closest negative t=360
+(-0.077, TOUCHDOWN banner). Every threshold in **(-0.077, 0.831)** classifies
+the set perfectly. `DEFAULT_THRESHOLD = 0.55` sits inside that plateau with
+0.28 of headroom below the weakest positive and 0.63 above the strongest
+negative, placed above the midpoint because false positives cost more.
+
+This threshold was validated against one channel's calibration. It is not a
+universal Madden constant.
+
+### Real-fixture confusion matrix
+
+```
+                 predicted present   predicted absent
+actual present                  33                  0
+actual absent                    0                  7
+```
+
+TP 33, TN 7, FP 0, FN 0. Accuracy 1.0000, PRESENT precision 1.0000, PRESENT
+recall 1.0000. No misclassifications. All four hard negatives rejected with
+negative scores: t=125 (-0.181), t=360 (-0.077), t=370 (-0.116), t=1140
+(-0.085).
+
+**These are fixture-validation metrics on a small, manually selected set from
+one channel. They are not an estimate of production accuracy.**
+
+### Resolution handling
+
+The detector rescales the profile with M2's deterministic rule and crops the
+scaled anchor, then resamples onto the fixed descriptor grid — so resolution
+normalisation is the descriptor itself, and no per-resolution threshold exists.
+Real 1920x1080 frames of the same broadcast, scored against the 720p-derived
+reference at the same threshold: t=780 +0.961 and t=1620 +0.964 present;
+t=360 -0.081, t=1140 -0.099, t=5 -0.022 absent. All correct. Scores dip
+slightly from 0.998 at 720p, which is expected resampling loss and is nowhere
+near the threshold. 854x480 scores +0.915. Incompatible aspect ratios raise
+`CalibrationValidationError` instead of being stretched.
+
+### Channel safety
+
+A reference records channel, profile lineage and profile revision, and
+`assert_matches` also compares anchor geometry. `ScoreboardDetector` runs that
+check once at construction, so a mismatched pair cannot reach a per-frame call,
+and recalibrating invalidates a stale reference rather than silently comparing
+the wrong pixels. `load_reference(path, expect_channel=...)` requires the
+channel, matching `load_profile`.
+
 ## Verified technical findings
 
 - **yt-dlp version is load-bearing.** The preinstalled system yt-dlp
@@ -428,7 +618,7 @@ delay.
 - `-copyts` also changed what live sources report: the NASA stream now shows
   absolute HLS media-timeline values (e.g. 81211.962s) instead of 0. It is
   still **not** wall-clock broadcast time. Live timing is otherwise untouched
-  and remains an M3/M5 problem.
+  and remains an M4/M5 problem.
 
 ### M2-specific limitations
 
@@ -447,14 +637,39 @@ delay.
   persistence.
 - Only schema version 1 exists, so no migration path has been exercised.
 
+### M3-specific limitations
+
+- **One channel, one game, 40 frames.** Perfect separation on this set is
+  evidence the approach is sound here, not a production accuracy estimate. The
+  next channel needs its own anchors, reference and threshold measurement.
+- **Opponent-colour invariance is unverified.** Anchor 0 straddles the boundary
+  between the left team's panel and the dark centre panel. Both anchors were
+  measured with the same two teams throughout, so a matchup whose panel colour
+  is much darker or brighter is untested. The gradient-magnitude measure was
+  chosen partly to hedge this, but hedging is not evidence.
+- **Categories missing from the fixture**: replay, halftime, quarter-break
+  graphic, postgame. The detector's behaviour on them is unknown.
+- **No temporal logic**, deliberately. A single dropped frame reads as absent,
+  and debouncing belongs to the runtime milestone.
+- **Reference frames were chosen by hand** (t=240, t=1500). There is no guidance
+  yet on how many frames a good reference needs; two sufficed here.
+- **Anchor geometry is fixed.** Nothing searches for a shifted board, so a
+  capture whose overlay moves needs recalibration, not detection.
+- The validation frames are gitignored, so `tools/m3_validate.py` needs a
+  network capture step before it can run on a fresh clone.
+
 ## Next action
 
-M3: turn the one-shot probe into a supervised, long-running capture loop for a
+M4: turn the one-shot probe into a supervised, long-running capture loop for a
 single live broadcast — reconnect on segment gaps and stream restarts, sample
 at a fixed cadence for the length of a game, and record whether ingestion
-survives a multi-hour broadcast. Explicitly **not** yet: detection, OCR,
-persistence, API.
+survives a multi-hour broadcast. It is the remaining ingestion unknown, it is
+independent of the vision work, and OCR is pointless without a feed that stays
+up. Explicitly **not** yet: OCR, temporal confirmation, persistence, API.
 
-M1 answered M0's open question by identifying and measuring a representative
-Madden recording. M2 turned those measurements into a validated, versioned,
-channel-bound profile that a future detector can consume.
+M1 identified and measured a representative Madden recording. M2 turned those
+measurements into a validated, versioned, channel-bound profile. M3 made that
+profile do real work: a single frame plus its channel's calibration now yields a
+present/absent verdict with per-anchor evidence, and the touchdown banner that
+motivated stable anchors is rejected because it does not match the calibrated
+structure — not because anything looks for the word "touchdown".
