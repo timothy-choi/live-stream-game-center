@@ -38,6 +38,22 @@ class MediaSource:
     http_headers: dict[str, str] = field(default_factory=dict)
     """Headers the decoder must replay; CDN URLs are often user-agent bound."""
 
+    fragment_urls: tuple[str, ...] = ()
+    """Ordered media segments, when the format is delivered as DASH segments.
+
+    Past-livestream VODs are served this way and have no single playable URL:
+    `media_url` alone is not decodable. Each segment is self-contained and
+    carries absolute presentation timestamps, so seeking means fetching only
+    the segments covering the wanted offset.
+    """
+
+    fragment_duration_s: float | None = None
+    """Nominal seconds per segment, used to map an offset to a segment index."""
+
+    @property
+    def is_fragmented(self) -> bool:
+        return bool(self.fragment_urls)
+
 
 @dataclass(frozen=True)
 class Frame:
@@ -53,10 +69,12 @@ class Frame:
     height: int
 
     timestamp_s: float | None
-    """Presentation timestamp from the decoder, in seconds.
+    """Absolute presentation timestamp within the source, in seconds.
 
-    For archived video this is an offset from the start. For live streams it is
-    an offset within the media segment window, NOT a wall-clock broadcast time.
+    The decoder runs FFmpeg with `-copyts`, so for archived video this is the
+    true offset from the start of the recording and stays correct after
+    seeking. For live streams it is an offset within the media segment window
+    we opened, NOT a wall-clock broadcast time.
     """
 
     source_url: str

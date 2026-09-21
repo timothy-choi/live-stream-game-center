@@ -40,11 +40,26 @@ Useful flags:
 | `--start-at S` | seek offset, archived sources only |
 | `--timeout S` | hard decode deadline (default 90) |
 | `--save N` | write the first N frames as PNG under `artifacts/frames/` |
+| `--label NAME` | prefix for saved diagnostic filenames |
 
 Live channel URLs work directly, e.g. `https://www.youtube.com/@NASA/live`.
 
-Exit codes distinguish the failing layer: `0` success, `2` source acquisition
-failed, `3` decoding failed.
+Exit codes distinguish the failing layer: `0` success, `1` bad arguments,
+`2` source acquisition failed, `3` decoding failed.
+
+`Frame.timestamp_s` is the absolute offset within the source, so it stays
+meaningful after seeking. Saved diagnostics are named with the video id and
+that offset, which makes a sample reproducible:
+
+```bash
+./.venv/bin/python -m lsgc.probe "https://www.youtube.com/watch?v=hBblAZD-ApY" \
+    --start-at 240 --frames 1 --interval 0 --save 1 --label SCOREBOARD_VISIBLE_1
+# -> artifacts/frames/SCOREBOARD_VISIBLE_1_hBblAZD-ApY_t00240.000s.png
+```
+
+Sources served as DASH segments (YouTube serves past livestreams this way)
+are handled by fetching only the segments covering the requested offset, so
+seeking into a long recording stays cheap.
 
 ## Tests
 

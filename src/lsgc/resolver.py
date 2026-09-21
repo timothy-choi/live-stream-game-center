@@ -86,6 +86,9 @@ def resolve_youtube(
         )
 
     selected = _select_format(info, max_height)
+    fragments = tuple(
+        f["url"] for f in (selected.get("fragments") or []) if f.get("url")
+    )
 
     return MediaSource(
         source_url=url,
@@ -100,4 +103,13 @@ def resolve_youtube(
         protocol=selected.get("protocol"),
         extractor=info.get("extractor"),
         http_headers=dict(selected.get("http_headers") or info.get("http_headers") or {}),
+        fragment_urls=fragments,
+        fragment_duration_s=_to_float(selected.get("target_duration")),
     )
+
+
+def _to_float(value) -> float | None:
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return None
