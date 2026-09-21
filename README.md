@@ -8,11 +8,11 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 10 complete (PASS) — team identity recognition, temporal
-matchup confirmation, and durable confirmed matchup persistence.** Confirmed
-matchup is temporally confirmed **visual scoreboard identity**. It is not
-schedule truth, title-derived truth, or owner-verified truth. REST,
-WebSockets, and frontend do not exist yet. See
+**Current milestone: 11 complete (PASS) — backend game API + real-time score
+delivery.** The API is a read-only product boundary over PostgreSQL. **API
+clients do not own tracking. Realtime connections do not own tracking.
+PostgreSQL durable state is authoritative.** Frontend, accounts, and owner
+correction APIs are not started. See
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ## Requirements
@@ -23,6 +23,8 @@ WebSockets, and frontend do not exist yet. See
   recover confirmed scores and confirmed matchups after a restart)
 - YouTube Data API v3 credentials for M9 broadcast discovery (API key and/or
   OAuth access token). Never committed; see `.env.example`.
+- FastAPI for the M11 read-only API. Orchestrator stays off unless
+  `LSGC_RUN_ORCHESTRATOR=true`.
 
 ## Setup
 
@@ -376,6 +378,101 @@ signed media URLs.
 
 The 2-second default cadence is a developer default, not a measured optimum.
 
+## Product API (M11)
+
+The API is a **read-only** delivery boundary. Tracking stays backend-owned by
+M9. Zero viewers, one viewer, many viewers, or disconnecting every subscriber
+does not start, stop, or reset the M4–M10 pipeline.
+
+**PostgreSQL is the source of truth.** Realtime SSE is an optimization for
+freshness. Clients must never depend on receiving every message.
+
+### Start
+
+```bash
+# API only — no YouTube credentials required
+./.venv/bin/python -m lsgc.api
+
+# Same process as M9 orchestration (needs YouTube + DATABASE_URL)
+LSGC_RUN_ORCHESTRATOR=true ./.venv/bin/python -m lsgc.api
+```
+
+Or `uvicorn lsgc.api.app:app_from_env --factory --host 127.0.0.1 --port 8000`.
+
+Configuration is environment-only. Do not hard-code PostgreSQL credentials.
+See `.env.example`. **M11 has no authentication** — local/development trust
+only. CORS is opt-in via `LSGC_CORS_ORIGINS` (never unrestricted by default).
+
+### Routes
+
+| Method | Path | Purpose |
+| --- | --- | --- |
+| GET | `/health` | Process alive + database reachable (YouTube not required) |
+| GET | `/api/games` | Product list/feed. `lifecycle`, `channel_id`, `limit`, `offset` |
+| GET | `/api/games/{id}` | Snapshot: identity, lifecycle, matchup, trusted score |
+| GET | `/api/games/{id}/score-events` | Append-only confirmed score timeline |
+| GET | `/api/games/{id}/events` | SSE product events |
+
+There is no separate `/feed`. Home-page “live + next N upcoming” uses
+`GET /api/games` with `lifecycle=LIVE,UPCOMING` and `limit`. Default order is
+LIVE, then UPCOMING by scheduled start, then recently ENDED. Default `limit`
+is 50 (max 100).
+
+All timestamps are ISO-8601 UTC with a `Z` suffix. Naive values are not
+returned.
+
+### Score and matchup
+
+- Score status is `UNCONFIRMED` or `TRUSTED`. Never `FINAL` / `OFFICIAL`.
+- Before M7 confirmation, `left`/`right` are `null` and `revision` is `0`.
+  The API does not invent `0-0`.
+- Matchup status is `UNCONFIRMED`, `CONFIRMED`, or `CONFLICT`.
+- Before M10 confirmation, teams are `null`.
+- After confirmation, teams come from the M10 catalog (`id`, `display_name`,
+  `abbreviation`). A later contradiction keeps the confirmed pair and sets
+  `CONFLICT` plus a short `conflict_pair`.
+
+### Realtime (SSE)
+
+SSE is used because M11 is one-way server → client. WebSockets are not
+implemented.
+
+Event envelope: `event_id`, per-game `sequence`, `game_id`, `type`,
+`occurred_at`, `score_revision`, `matchup_revision`, `cursor`, `payload.game`.
+
+Types: `GAME_SNAPSHOT`, `SCORE_CONFIRMED`, `MATCHUP_CONFIRMED`,
+`MATCHUP_CONFLICT`, `PLATFORM_LIFECYCLE_CHANGED`, `TRACKING_STATUS_CHANGED`,
+`RESYNC_REQUIRED`.
+
+**Reconnect algorithm**
+
+1. Fetch `GET /api/games/{id}` (and score-events if needed).
+2. Subscribe to `/api/games/{id}/events`. The first event is `GAME_SNAPSHOT`
+   generated **after** registration, so a mutation between snapshot and
+   subscribe is visible (lost-wakeup closed).
+3. On disconnect, fetch durable state again (or `?once=true` for a single
+   snapshot) and resubscribe.
+4. Ignore stale/duplicate events using `sequence`, `cursor`, and
+   `score_revision`.
+
+No generic event table was added. Catch-up is derived from `games`,
+`confirmed_score_changes`, and matchup columns. An in-process hub is notified
+after successful writes. Publisher failures are swallowed. Process restart
+drops ephemeral notifications; durable snapshot/cursor recovery still works.
+
+Subscriber queues are bounded (`LSGC_SSE_MAX_QUEUE`, default 32). Overflow
+marks the subscriber and sends `RESYNC_REQUIRED` instead of growing memory
+or blocking the tracking worker. Heartbeats are SSE comments
+(`LSGC_SSE_HEARTBEAT_S`, default 15s) and are not game state.
+
+FastAPI concurrent requests use a small `psycopg_pool` connection pool. M9
+workers may still use one serialized connection; the API must not share it.
+
+```bash
+python tools/m11_validate.py            # in-memory snapshot/subscribe/reconnect
+python tools/m11_validate.py --postgres # same against LSGC_TEST_DATABASE_URL
+```
+
 ## Tests
 
 ```bash
@@ -402,6 +499,8 @@ python tools/m9_validate.py            # optional YouTube Data API metadata chec
 python tools/m10_validate.py           # identity+matchup; reuses M3/M5 frames
 python tools/m10_validate.py --1080
 python tools/m10_validate.py --postgres
+python tools/m11_validate.py
+python tools/m11_validate.py --postgres
 ```
 
 ## Layout
@@ -427,15 +526,18 @@ src/lsgc/
                 restore() loads durable confirmed state; not a game-final.
   persist/      PostgreSQL games + append-only confirmed_score_changes and
                 confirmed_matchup_changes, DurableScoreTracker,
-                DurableMatchupTracker. No REST.
+                DurableMatchupTracker, optional change publisher, connection
+                pool for concurrent API reads.
   identity/     team catalog, logo templates, presentation routing,
                 MatchupObservationPipeline, TemporalMatchupValidator.
                 Raw identity is not a confirmed matchup.
   broadcast/    YouTube Data API discovery, schedule sync, eligibility,
                 in-process TrackingSupervisor. Control plane only.
+  api/          read-only FastAPI + SSE. Product schemas, event hub, routes.
+                Never starts tracking.
 migrations/     versioned SQL
 docker-compose.postgres.yml
-tools/          developer scripts for M3–M10 labelled-set capture and scoring;
+tools/          developer scripts for M3–M11 labelled-set capture and scoring;
                 network/DB as noted, never run by default pytest
 tests/
   fixtures/     calibration profile, M3 reference, M6 digit glyphs, M10 logo

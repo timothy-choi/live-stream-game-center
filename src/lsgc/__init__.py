@@ -10,7 +10,9 @@ Trusted is not official, final, or corrected. `lsgc.broadcast` discovers
 YouTube broadcasts for configured channels and orchestrates local tracking
 workers without a viewer. `lsgc.identity` reads team identity from calibrated
 scoreboard crops and confirms a matchup over time into durable visual identity.
-Confirmed matchup is not schedule, title, or owner-verified truth.
+Confirmed matchup is not schedule, title, or owner-verified truth. `lsgc.api`
+exposes a read-only FastAPI snapshot and SSE delivery boundary. API clients
+never start or stop tracking.
 """
 
 from lsgc.errors import DecodeError, IngestionError, SourceResolutionError

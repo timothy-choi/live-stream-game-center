@@ -13,12 +13,22 @@ from lsgc.persist.errors import (
     StaleConfirmationError,
     UnknownGameError,
 )
+from lsgc.persist.notify import (
+    KIND_MATCHUP_CONFIRMED,
+    KIND_MATCHUP_CONFLICT,
+    KIND_PLATFORM_LIFECYCLE_CHANGED,
+    KIND_SCORE_CONFIRMED,
+    KIND_TRACKING_STATUS_CHANGED,
+    GameChangePublisher,
+    emit_game_change,
+)
 from lsgc.persist.models import (
     Game,
     MatchupPersistResult,
     PersistOutcome,
     PersistResult,
     PlatformLifecycle,
+    ScoreChangeRecord,
     TrackingStatus,
 )
 from lsgc.persist.repository import (
@@ -31,15 +41,20 @@ from lsgc.track.models import ConfirmedScoreChange
 
 
 class InMemoryGameRepository:
-    def __init__(self) -> None:
+    def __init__(self, publisher: GameChangePublisher | None = None) -> None:
         self._games: dict[UUID, Game] = {}
         self._by_identity: dict[tuple[str, str], UUID] = {}
         self._history: dict[UUID, list[ConfirmedScoreChange]] = {}
         self._matchup_history: dict[UUID, list[ConfirmedMatchupChange]] = {}
+        self._score_persisted_at: dict[UUID, dict[int, datetime]] = {}
+        self._publisher = publisher
         self.fail_next_persist = False
         self.fail_next_end = False
         self.fail_next_matchup_persist = False
         self.fail_next_matchup_conflict = False
+
+    def ping(self) -> bool:
+        return True
 
     def create_or_get_game(
         self,
@@ -78,6 +93,7 @@ class InMemoryGameRepository:
         self._by_identity[identity] = game.id
         self._history[game.id] = []
         self._matchup_history[game.id] = []
+        self._score_persisted_at[game.id] = {}
         return game
 
     def get_game(self, game_id: UUID) -> Game:
@@ -104,6 +120,83 @@ class InMemoryGameRepository:
         )
         return tuple(games)
 
+    def list_games(
+        self,
+        *,
+        channel_id: str | None = None,
+        lifecycles: tuple[PlatformLifecycle, ...] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[tuple[Game, ...], int]:
+        if limit < 1:
+            raise PersistError("limit must be >= 1")
+        if offset < 0:
+            raise PersistError("offset must be >= 0")
+        games = list(self._games.values())
+        if channel_id:
+            games = [g for g in games if g.channel_id == channel_id]
+        if lifecycles:
+            allowed = set(lifecycles)
+            games = [g for g in games if g.platform_lifecycle in allowed]
+        far_future = datetime(9999, 1, 1, tzinfo=UTC)
+        epoch = datetime(1970, 1, 1, tzinfo=UTC)
+
+        def sort_key(game: Game) -> tuple:
+            lifecycle = game.platform_lifecycle
+            if lifecycle is PlatformLifecycle.LIVE:
+                bucket = 0
+            elif lifecycle is PlatformLifecycle.UPCOMING:
+                bucket = 1
+            elif lifecycle is PlatformLifecycle.ENDED:
+                bucket = 2
+            else:
+                bucket = 3
+            upcoming_key = (
+                game.scheduled_start_at or far_future
+                if lifecycle is PlatformLifecycle.UPCOMING
+                else epoch
+            )
+            ended_key = (
+                -(game.actual_end_at or game.updated_at).timestamp()
+                if lifecycle is PlatformLifecycle.ENDED
+                else 0.0
+            )
+            return (
+                bucket,
+                upcoming_key,
+                ended_key,
+                -game.created_at.timestamp(),
+                str(game.id),
+            )
+
+        games.sort(key=sort_key)
+        total = len(games)
+        return tuple(games[offset : offset + limit]), total
+
+    def list_score_change_records(
+        self,
+        game_id: UUID,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[ScoreChangeRecord, ...]:
+        self.get_game(game_id)
+        if offset < 0:
+            raise PersistError("offset must be >= 0")
+        if limit is not None and limit < 1:
+            raise PersistError("limit must be >= 1")
+        history = self._history[game_id]
+        persisted = self._score_persisted_at[game_id]
+        records = [
+            ScoreChangeRecord(
+                change=change,
+                persisted_at=persisted.get(change.revision, datetime.now(tz=UTC)),
+            )
+            for change in history
+        ]
+        sliced = records[offset:] if limit is None else records[offset : offset + limit]
+        return tuple(sliced)
+
     def upsert_broadcast_metadata(
         self,
         *,
@@ -122,6 +215,7 @@ class InMemoryGameRepository:
             external_broadcast_id=external_broadcast_id,
             channel_id=channel_id,
         )
+        previous_lifecycle = game.platform_lifecycle
         now = datetime.now(tz=UTC)
         updated = self._replace(
             game,
@@ -143,6 +237,8 @@ class InMemoryGameRepository:
             updated_at=now,
         )
         self._games[game.id] = updated
+        if previous_lifecycle != updated.platform_lifecycle:
+            emit_game_change(self._publisher, KIND_PLATFORM_LIFECYCLE_CHANGED, updated)
         return updated
 
     def set_tracking_enabled(self, game_id: UUID, enabled: bool) -> Game:
@@ -153,6 +249,7 @@ class InMemoryGameRepository:
             updated_at=datetime.now(tz=UTC),
         )
         self._games[game_id] = updated
+        emit_game_change(self._publisher, KIND_TRACKING_STATUS_CHANGED, updated)
         return updated
 
     def record_worker_finished(
@@ -222,7 +319,10 @@ class InMemoryGameRepository:
         history.append(change)
         self._games[game_id] = updated
         self._history[game_id] = history
-        return PersistResult(PersistOutcome.APPLIED, updated, change)
+        self._score_persisted_at[game_id][change.revision] = now
+        result = PersistResult(PersistOutcome.APPLIED, updated, change)
+        emit_game_change(self._publisher, KIND_SCORE_CONFIRMED, updated)
+        return result
 
     def mark_acquisition_ended(self, game_id: UUID) -> Game:
         if self.fail_next_end:
@@ -236,6 +336,7 @@ class InMemoryGameRepository:
             updated_at=now,
         )
         self._games[game_id] = updated
+        emit_game_change(self._publisher, KIND_TRACKING_STATUS_CHANGED, updated)
         return updated
 
     def assert_current_matches_history(self, game_id: UUID) -> None:
@@ -297,7 +398,9 @@ class InMemoryGameRepository:
         history.append(change)
         self._games[game_id] = updated
         self._matchup_history[game_id] = history
-        return MatchupPersistResult(PersistOutcome.APPLIED, updated, change)
+        result = MatchupPersistResult(PersistOutcome.APPLIED, updated, change)
+        emit_game_change(self._publisher, KIND_MATCHUP_CONFIRMED, updated)
+        return result
 
     def record_matchup_conflict(
         self, game_id: UUID, conflict_pair: tuple[str, str]
@@ -314,6 +417,7 @@ class InMemoryGameRepository:
             updated_at=now,
         )
         self._games[game_id] = updated
+        emit_game_change(self._publisher, KIND_MATCHUP_CONFLICT, updated)
         return updated
 
     def _replace(self, game: Game, **changes: object) -> Game:

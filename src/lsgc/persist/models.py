@@ -123,6 +123,14 @@ class Game:
 
 
 @dataclass(frozen=True)
+class ScoreChangeRecord:
+    """Confirmed score history row plus wall-clock persist time for the API."""
+
+    change: ConfirmedScoreChange
+    persisted_at: datetime
+
+
+@dataclass(frozen=True)
 class PersistResult:
     outcome: PersistOutcome
     game: Game

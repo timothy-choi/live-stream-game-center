@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-21 (Milestone 10 PASS)
+Last updated: 2026-09-21 (Milestone 11 PASS)
 
 ## Product
 
@@ -25,8 +25,8 @@ Python API, Python vision/processing worker, PostgreSQL, lightweight frontend.
 No microservices, no Redis/Celery/Kafka/Kubernetes. PostgreSQL persistence
 exists (M8). YouTube broadcast discovery and local tracking orchestration
 exist (M9). Visual team identity, temporal matchup confirmation, and durable
-confirmed matchup persistence exist (M10). REST, WebSockets, and frontend do
-not.
+confirmed matchup persistence exist (M10). A read-only FastAPI + SSE delivery
+boundary exists (M11). Frontend does not.
 
 ## Milestone sequence
 
@@ -43,7 +43,7 @@ not.
 | M8 | Durable game / trusted-score persistence + restart recovery | **PASS, verified** |
 | M9 | YouTube broadcast discovery + tracking-session orchestration | **PASS, verified** |
 | M10 | Team / opponent identity + temporal matchup + durable matchup | **PASS, verified** |
-| M11 | API (REST / live updates) | Not started |
+| M11 | API (REST / live updates) | **PASS, verified** |
 | M12 | Frontend scoreboard and game pages | Not started |
 
 ## M0 status: PASS
@@ -1551,14 +1551,83 @@ YouTube title remains metadata. Visual identity is not parsed from it.
 - **No final-score, winner, quarter, or clock reading.**
 - **Sparse confirmation latency is label spacing.**
 
+## M11 status: PASS
+
+Goal: expose a product-facing read/delivery API over durable M8–M10 state
+without letting clients own tracking.
+
+- **REST SNAPSHOTS: VERIFIED** — `GET /api/games`, detail, score timeline
+- **SSE PRODUCT EVENTS: VERIFIED** — snapshot-after-subscribe, score /
+  matchup / lifecycle updates, bounded queues
+- **RECONNECT / LOST-WAKEUP: VERIFIED** — durable snapshot after
+  registration; score-events catch-up
+- **VIEWER INDEPENDENCE: VERIFIED** — 0 / 1 / many / disconnect-all do not
+  start or stop tracking
+- **API WITHOUT YOUTUBE: VERIFIED** — `LSGC_RUN_ORCHESTRATOR=false`
+- **POSTGRESQL AUTHORITY: VERIFIED** — pool reads + restart unchanged
+
+### Architecture
+
+```
+Application
+   +--> FastAPI (read-only)
+   +--> optional M9 BroadcastOrchestrator (LSGC_RUN_ORCHESTRATOR)
+PostgreSQL remains canonical. In-process GameEventHub notifies after
+successful writes. Failures/slowness there cannot block persist.
+```
+
+No Redis, Kafka, Celery, GraphQL, ORM, or split API/realtime services.
+No new event table. Catch-up is derived from `games`,
+`confirmed_score_changes`, and matchup columns.
+
+Concurrent API access uses `psycopg_pool` (`PooledGameRepository`: one
+checkout per call). M9 may keep one serialized connection for workers.
+
+### Semantics
+
+- Game id = durable UUID. Also `platform=youtube` + `external_broadcast_id`.
+- Score: `UNCONFIRMED` | `TRUSTED`. Never FINAL.
+- Matchup: `UNCONFIRMED` | `CONFIRMED` | `CONFLICT`. Confirmed teams stay.
+- Upcoming unconfirmed games return null teams and null scores (not 0-0).
+- Ended broadcasts keep TRUSTED scores.
+- Timestamps: ISO-8601 UTC (`Z`).
+- Health: process alive vs database reachable. YouTube not required.
+
+### Realtime
+
+Transport: **SSE** (one-way server → client). Heartbeat comments are not
+state. `sequence` is per-game and monotonic in-process. `cursor` /
+`score_revision` identify stale or duplicate events.
+
+Lost-wakeup: subscribe first, then emit `GAME_SNAPSHOT` from the current
+row. A revision N snapshot followed by mutation N+1 before subscribe still
+yields snapshot N+1.
+
+Slow subscribers: queue max 32 (configurable). Overflow → `RESYNC_REQUIRED`
+and disconnect. `put_nowait` never blocks the producer.
+
+Process restart loses ephemeral hub messages. Clients recover from
+PostgreSQL.
+
+### Limitations
+
+- No authentication. Local/development trust only. CORS is explicit origins.
+- No frontend, accounts, owner writes, tracking-enable API, final scores,
+  winners, standings, or notifications.
+- In-process hub is single-process. Multiple API processes would not share
+  ephemeral notifications (durable catch-up still works).
+- SSE `sequence` resets on process restart; `cursor` and score revisions
+  remain durable.
+
 ## Next action
 
-M10 is complete for its intended scope (visual identity + temporal matchup
-+ durable confirmed matchup). **REST / live client updates are not
-started.** Controlled real disruption/recovery remains unverified from M4.
+M11 is complete for its intended scope (read-only product API + SSE).
+**Frontend is not started.** Controlled real disruption/recovery remains
+unverified from M4.
 
-Explicitly **not** implied by M10 PASS: official/final/corrected score,
-REST, WebSockets, frontend, owner matchup correction, title-derived
-matchup, 32-team visual coverage, text-mode OCR, quarter/clock OCR,
-automatic new-game detection, football increment rules, multi-host locking.
+Explicitly **not** implied by M11 PASS: official/final/corrected score,
+owner mutation APIs, authentication, frontend, title-derived matchup,
+32-team visual coverage, text-mode OCR, quarter/clock OCR, automatic
+new-game detection, football increment rules, multi-host locking,
+distributed event brokers.
 

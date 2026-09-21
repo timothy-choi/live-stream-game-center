@@ -24,8 +24,10 @@ from lsgc.persist.models import (
     PersistOutcome,
     PersistResult,
     PlatformLifecycle,
+    ScoreChangeRecord,
     TrackingStatus,
 )
+from lsgc.persist.pool import PooledGameRepository, open_pool
 from lsgc.persist.repository import (
     PostgresGameRepository,
     event_payload_matches,
@@ -48,8 +50,10 @@ __all__ = [
     "PersistOutcome",
     "PersistResult",
     "PlatformLifecycle",
+    "PooledGameRepository",
     "PostgresGameRepository",
     "SchemaError",
+    "ScoreChangeRecord",
     "StaleConfirmationError",
     "TrackingStatus",
     "UnknownGameError",
@@ -58,4 +62,5 @@ __all__ = [
     "database_url",
     "event_payload_matches",
     "matchup_payload_matches",
+    "open_pool",
 ]

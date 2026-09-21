@@ -1,0 +1,145 @@
+"""Product-facing JSON contracts. Independent of persistence dataclasses."""
+
+from __future__ import annotations
+
+from enum import Enum
+from uuid import UUID
+
+from pydantic import BaseModel, ConfigDict, Field
+
+
+class ScoreStatus(str, Enum):
+    UNCONFIRMED = "UNCONFIRMED"
+    TRUSTED = "TRUSTED"
+
+
+class MatchupStatus(str, Enum):
+    UNCONFIRMED = "UNCONFIRMED"
+    CONFIRMED = "CONFIRMED"
+    CONFLICT = "CONFLICT"
+
+
+class GameEventType(str, Enum):
+    GAME_SNAPSHOT = "GAME_SNAPSHOT"
+    SCORE_CONFIRMED = "SCORE_CONFIRMED"
+    MATCHUP_CONFIRMED = "MATCHUP_CONFIRMED"
+    MATCHUP_CONFLICT = "MATCHUP_CONFLICT"
+    PLATFORM_LIFECYCLE_CHANGED = "PLATFORM_LIFECYCLE_CHANGED"
+    TRACKING_STATUS_CHANGED = "TRACKING_STATUS_CHANGED"
+    RESYNC_REQUIRED = "RESYNC_REQUIRED"
+
+
+class TeamSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: str
+    display_name: str
+    abbreviation: str | None = None
+
+
+class ConflictPair(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    left_team_id: str
+    right_team_id: str
+
+
+class MatchupSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: MatchupStatus
+    left_team: TeamSummary | None = None
+    right_team: TeamSummary | None = None
+    revision: int = 0
+    conflict_pair: ConflictPair | None = None
+    conflict_count: int = 0
+
+
+class ScoreSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: ScoreStatus
+    left: int | None = None
+    right: int | None = None
+    revision: int = 0
+
+
+class GameSummary(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    platform: str
+    external_broadcast_id: str
+    channel_id: str | None = None
+    title: str | None = None
+    platform_lifecycle: str
+    tracking_status: str
+    tracking_enabled: bool
+    scheduled_start_at: str | None = None
+    actual_start_at: str | None = None
+    actual_end_at: str | None = None
+    matchup: MatchupSummary
+    score: ScoreSummary
+    last_updated_at: str
+    cursor: str
+
+
+class GameListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    games: list[GameSummary]
+    total: int
+    limit: int
+    offset: int
+
+
+class ScoreTimelineEvent(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    revision: int
+    previous_left: int | None = None
+    previous_right: int | None = None
+    left: int
+    right: int
+    initialization: bool
+    confirmed_at: str
+
+
+class ScoreTimelineResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    game_id: UUID
+    events: list[ScoreTimelineEvent]
+    total: int
+    limit: int
+    offset: int
+
+
+class GameEvent(BaseModel):
+    """Realtime envelope. `sequence` is per-game and monotonic in-process."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    event_id: str
+    sequence: int
+    game_id: UUID
+    type: GameEventType
+    occurred_at: str
+    score_revision: int
+    matchup_revision: int
+    cursor: str
+    payload: dict = Field(default_factory=dict)
+
+
+class HealthResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    status: str
+    process: str
+    database: str
+
+
+class ErrorBody(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    detail: str

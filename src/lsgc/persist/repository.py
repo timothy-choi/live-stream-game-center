@@ -21,12 +21,22 @@ from lsgc.persist.errors import (
     StaleConfirmationError,
     UnknownGameError,
 )
+from lsgc.persist.notify import (
+    KIND_MATCHUP_CONFIRMED,
+    KIND_MATCHUP_CONFLICT,
+    KIND_PLATFORM_LIFECYCLE_CHANGED,
+    KIND_SCORE_CONFIRMED,
+    KIND_TRACKING_STATUS_CHANGED,
+    GameChangePublisher,
+    emit_game_change,
+)
 from lsgc.persist.models import (
     Game,
     MatchupPersistResult,
     PersistOutcome,
     PersistResult,
     PlatformLifecycle,
+    ScoreChangeRecord,
     TrackingStatus,
 )
 from lsgc.identity.models import ConfirmedMatchupChange, IdentityMethod
@@ -122,12 +132,21 @@ def _serialized(method):
 
 
 class PostgresGameRepository:
-    """SQL for games + confirmed_score_changes. One connection, caller-owned."""
+    """SQL for games + confirmed_score_changes. One connection, caller-owned.
 
-    def __init__(self, conn: psycopg.Connection) -> None:
+    Optional `publisher` is notified after successful durable mutations. It
+    must not be required for persistence; failures there are ignored.
+    """
+
+    def __init__(
+        self,
+        conn: psycopg.Connection,
+        publisher: GameChangePublisher | None = None,
+    ) -> None:
         self._conn = conn
         self._lock = threading.RLock()
         self._depth = 0
+        self._publisher = publisher
 
     @_serialized
     def create_or_get_game(
@@ -218,6 +237,58 @@ class PostgresGameRepository:
         return tuple(_game_from_row(row) for row in rows)
 
     @_serialized
+    def list_games(
+        self,
+        *,
+        channel_id: str | None = None,
+        lifecycles: tuple[PlatformLifecycle, ...] | None = None,
+        limit: int = 50,
+        offset: int = 0,
+    ) -> tuple[tuple[Game, ...], int]:
+        """Product list: LIVE, then UPCOMING by start, then recently ENDED."""
+        if limit < 1:
+            raise PersistError("limit must be >= 1")
+        if offset < 0:
+            raise PersistError("offset must be >= 0")
+        clauses = ["TRUE"]
+        params: list[object] = []
+        if channel_id:
+            clauses.append("channel_id = %s")
+            params.append(channel_id)
+        if lifecycles:
+            clauses.append("platform_lifecycle = ANY(%s)")
+            params.append([item.value for item in lifecycles])
+        where = " AND ".join(clauses)
+        total = self._conn.execute(
+            f"SELECT COUNT(*) AS n FROM games WHERE {where}",
+            params,
+        ).fetchone()
+        count = int(total["n"]) if total else 0
+        rows = self._conn.execute(
+            f"""
+            SELECT {_GAME_COLUMNS} FROM games
+             WHERE {where}
+             ORDER BY
+                CASE platform_lifecycle
+                    WHEN 'LIVE' THEN 0
+                    WHEN 'UPCOMING' THEN 1
+                    WHEN 'ENDED' THEN 2
+                    ELSE 3
+                END,
+                CASE WHEN platform_lifecycle = 'UPCOMING' THEN scheduled_start_at END
+                    ASC NULLS LAST,
+                CASE WHEN platform_lifecycle = 'ENDED'
+                     THEN COALESCE(actual_end_at, updated_at) END
+                    DESC NULLS LAST,
+                created_at DESC,
+                id
+             LIMIT %s OFFSET %s
+            """,
+            [*params, limit, offset],
+        ).fetchall()
+        return tuple(_game_from_row(row) for row in rows), count
+
+    @_serialized
     def upsert_broadcast_metadata(
         self,
         *,
@@ -234,6 +305,8 @@ class PostgresGameRepository:
         """Create or update schedule/lifecycle fields. Never writes trusted scores."""
         validate_broadcast_id(platform, external_broadcast_id)
         identity = external_broadcast_id.strip()
+        previous = self.get_game_by_external_id(platform, identity)
+        previous_lifecycle = None if previous is None else previous.platform_lifecycle
         now = datetime.now(tz=UTC)
         with self._conn.transaction():
             self.create_or_get_game(
@@ -270,6 +343,8 @@ class PostgresGameRepository:
         game = self.get_game_by_external_id(platform, identity)
         if game is None:
             raise PersistError("failed to upsert broadcast metadata")
+        if previous_lifecycle != game.platform_lifecycle:
+            emit_game_change(self._publisher, KIND_PLATFORM_LIFECYCLE_CHANGED, game)
         return game
 
     @_serialized
@@ -290,7 +365,9 @@ class PostgresGameRepository:
                 """,
                 (enabled, now, game_id),
             )
-        return self.get_game(game_id)
+        game = self.get_game(game_id)
+        emit_game_change(self._publisher, KIND_TRACKING_STATUS_CHANGED, game)
+        return game
 
     @_serialized
     def record_worker_finished(
@@ -338,6 +415,51 @@ class PostgresGameRepository:
         return tuple(_change_from_row(row) for row in rows)
 
     @_serialized
+    def list_score_change_records(
+        self,
+        game_id: UUID,
+        *,
+        limit: int | None = None,
+        offset: int = 0,
+    ) -> tuple[ScoreChangeRecord, ...]:
+        self.get_game(game_id)
+        if offset < 0:
+            raise PersistError("offset must be >= 0")
+        if limit is not None and limit < 1:
+            raise PersistError("limit must be >= 1")
+        sql = """
+            SELECT revision, previous_left, previous_right, new_left, new_right,
+                   initialization, evidence_count, first_seen_timestamp_s,
+                   first_seen_frame_index, confirmed_timestamp_s,
+                   confirmed_frame_index, confirmed_epoch, persisted_at
+              FROM confirmed_score_changes
+             WHERE game_id = %s
+             ORDER BY revision
+        """
+        params: list[object] = [game_id]
+        if limit is not None:
+            sql += " LIMIT %s OFFSET %s"
+            params.extend([limit, offset])
+        elif offset:
+            sql += " OFFSET %s"
+            params.append(offset)
+        rows = self._conn.execute(sql, params).fetchall()
+        records = []
+        for row in rows:
+            persisted = row["persisted_at"]
+            if persisted.tzinfo is None:
+                persisted = persisted.replace(tzinfo=UTC)
+            records.append(
+                ScoreChangeRecord(change=_change_from_row(row), persisted_at=persisted)
+            )
+        return tuple(records)
+
+    def ping(self) -> bool:
+        with self._lock:
+            self._conn.execute("SELECT 1")
+        return True
+
+    @_serialized
     def persist_confirmation(
         self, game_id: UUID, change: ConfirmedScoreChange
     ) -> PersistResult:
@@ -375,7 +497,9 @@ class PostgresGameRepository:
                     raise ConflictingConfirmationError(
                         "confirmation previous pair does not match current trusted score"
                     )
-                return self._insert_and_update(game_id, change)
+                result = self._insert_and_update(game_id, change)
+            emit_game_change(self._publisher, KIND_SCORE_CONFIRMED, result.game)
+            return result
         except UniqueViolation as exc:
             stored = self._load_revision(game_id, change.revision)
             if stored is not None and event_payload_matches(stored, change):
@@ -466,7 +590,9 @@ class PostgresGameRepository:
                 """,
                 (TrackingStatus.ACQUISITION_ENDED.value, now, game_id),
             )
-            return self.get_game(game_id)
+        game = self.get_game(game_id)
+        emit_game_change(self._publisher, KIND_TRACKING_STATUS_CHANGED, game)
+        return game
 
     @_serialized
     def assert_current_matches_history(self, game_id: UUID) -> None:
@@ -555,7 +681,9 @@ class PostgresGameRepository:
                     raise ConflictingMatchupError(
                         f"expected matchup revision 1, got {change.revision}"
                     )
-                return self._insert_and_update_matchup(game_id, change)
+                result = self._insert_and_update_matchup(game_id, change)
+            emit_game_change(self._publisher, KIND_MATCHUP_CONFIRMED, result.game)
+            return result
         except UniqueViolation as exc:
             stored = self._load_matchup_revision(game_id, change.revision)
             if stored is not None and matchup_payload_matches(stored, change):
@@ -669,7 +797,9 @@ class PostgresGameRepository:
                 """,
                 (label, now, game_id),
             )
-        return self.get_game(game_id)
+        game = self.get_game(game_id)
+        emit_game_change(self._publisher, KIND_MATCHUP_CONFLICT, game)
+        return game
 
 
 def _matchup_from_row(row: dict_row | dict) -> ConfirmedMatchupChange:
