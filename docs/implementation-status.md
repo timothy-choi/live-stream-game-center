@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-21 (Milestone 4 PASS)
+Last updated: 2026-09-21 (Milestone 5 PASS)
 
 ## Product
 
@@ -33,7 +33,7 @@ No microservices, no Redis/Celery/Kafka/Kubernetes. None of this exists yet.
 | M2 | Channel-bound calibration foundation | **PASS, verified** |
 | M3 | Calibrated scoreboard-presence detection | **PASS, verified** |
 | M4 | Continuous frame acquisition for a single live broadcast | **PASS, verified** |
-| M5 | Score OCR observations + trusted persisted score state | Not started |
+| M5 | Cross-matchup scoreboard-detector validation | **PASS, verified** |
 | M6 | API + persistence | Not started |
 | M7 | Frontend scoreboard and game pages | Not started |
 
@@ -138,13 +138,51 @@ stable URL. `reconnects` (`reconnect_count`) stayed **0** on both real live
 runs even when `resolves` went 1→2. Do not read `reconnects=0` as “no
 re-resolution occurred.”
 
+## M5 status: PASS
+
+Goal: find out whether the existing M3 channel-calibrated scoreboard detector
+recognizes the same Madden 27 Arcade scoreboard across **different matchups**
+on the **same** calibrated channel, without matchup-specific visual content.
+
+- **UNCHANGED M3 DETECTOR: VERIFIED** on four Super Season 7 archives
+- **PATH A: NO DETECTOR / THRESHOLD / ANCHOR CHANGES**
+- **ORIGINAL M3 33/7 REGRESSION: 40/40** still perfect at threshold 0.55
+- **ANCHOR 0 / LEFT PANEL: MEASURED**, not assumed — team color moves a0
+  slightly; it does not approach the decision boundary
+- **SCORE / IDENTITY GEOMETRY: ALIGNED** on the four games (readiness only; no OCR)
+
+Controlled live disruption/recovery remains unverified (M4 leftover). Score
+OCR is not started.
+
+### Real cross-matchup evidence
+
+Playlist `PLNh37ICHy5Cw` (“49ers - Super Season 7”), 60 entries, all channel
+`UCz3q0f-dMPNIyQhntPTE7gQ`. Four games frozen **before** detector evaluation
+for visual diversity, not for scores:
+
+| key | video ID | matchup | why |
+| --- | --- | --- | --- |
+| chargers | `G2kMfIDFNIQ` | Chargers @ 49ers | navy bolt on **left** panel |
+| packers | `A8Qd1dKHKUE` | 49ers @ Packers | green/gold G on **right** panel |
+| raiders | `wDbkLLJT4i8` | Raiders @ 49ers | black/silver on **left** panel |
+| vikings | `UITXyHeI5KE` | Vikings @ 49ers | purple horns on **left** panel |
+
+Original fixture `hBblAZD-ApY` (49ers @ Giants) and M4 test streams
+`PWw6gEH32bo` / `nI4DUFbEvrQ` were excluded. 99 manually labelled frames
+(87 present / 12 absent) at 1280×720. Unchanged detector (profile
+`madden27-arcade-prismlive`, reference from `hBblAZD-ApY` t=240/1500,
+threshold **0.55**, min-of-anchors): **TP=87 TN=12 FP=0 FN=0**. Combined
+positives +0.884…+0.997; combined negatives −0.280…+0.398; gap **+0.486**.
+
+M4 live labels were not reused.
+
 ## Verified commands
 
 ```bash
 # setup
 python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
-# tests (offline, 315 passed)
+# tests (offline, 320 passed)
 ./.venv/bin/python -m pytest
 
 # archived: 5/5 frames, 1280x720, pts 0.000-4.000s, exit 0
@@ -670,6 +708,21 @@ FFmpeg child. Backoff waits are `Event.wait`, so they return promptly. No
 frames are emitted after cancel. Tests cover cancel while running and during
 backoff.
 
+## M5: cross-matchup presence detection
+
+Same M3 detector, profile, reference, and 0.55 threshold. No new similarity
+method. Validation frames live under gitignored `artifacts/m5/<key>/`.
+
+```bash
+python tools/m5_fixture.py capture     # needs YouTube
+python tools/m5_validate.py
+python tools/m3_validate.py            # original 33/7 regression
+```
+
+`tests/fixtures/m5_validation_set.json` holds 99 labels. Offsets are fixture
+metadata only. A 1920x1080 subset of `UITXyHeI5KE` (t=40 present, t=100
+TOUCHDOWN absent, t=600 present) was correct via existing profile scaling.
+
 ## Verified technical findings
 
 - **yt-dlp version is load-bearing.** The preinstalled system yt-dlp
@@ -776,11 +829,11 @@ delay.
 - **One channel, one game, 40 frames.** Perfect separation on this set is
   evidence the approach is sound here, not a production accuracy estimate. The
   next channel needs its own anchors, reference and threshold measurement.
-- **Opponent-colour invariance is unverified.** Anchor 0 straddles the boundary
-  between the left team's panel and the dark centre panel. Both anchors were
-  measured with the same two teams throughout, so a matchup whose panel colour
-  is much darker or brighter is untested. The gradient-magnitude measure was
-  chosen partly to hedge this, but hedging is not evidence.
+- **Opponent-colour invariance is now measured on four extra matchups (M5).**
+  Anchor 0 still sits on the left panel / centre-panel divider. Left-team color
+  moves a0 (Chargers navy positives min +0.884 vs Packers 49ers-left median
+  +0.997) but all 87 M5 positives stayed ≥ +0.884 against threshold 0.55.
+  This is one channel's Arcade overlay, not a Madden-wide guarantee.
 - **Categories missing from the fixture**: replay, halftime, quarter-break
   graphic, postgame. The detector's behaviour on them is unknown.
 - **No temporal logic**, deliberately. A single dropped frame reads as absent,
@@ -820,12 +873,30 @@ delay.
   20-minute run used the M1 fixture profile against live PRISM output; ten
   isolated ABSENT frames after gameplay started have no logged visual cause.
 
+### M5-specific limitations
+
+- **Four matchups on one channel, one capture layout.** Playlist Super Season 7
+  PRISM Arcade overlay. Not universal Madden, not a second channel, not a
+  different phone-capture crop.
+- **Negatives are sparse relative to positives** (12 vs 87). Hard negatives
+  found: SF TOUCHDOWN (packers t=420, vikings t=100), EXTRA POINT (raiders
+  t=95 and t=465). Categories still thin or absent: replay, halftime graphic,
+  postgame, quarter-break full-screen.
+- **Anchor 0 still overlaps the left panel edge.** Team color is measurable
+  there. The 0.55 threshold has headroom on these four games; a much brighter
+  or noisier left panel is untested.
+- **Raiders t=465 EXTRA POINT** scored combined +0.398 (a1 +0.619) because
+  divider chrome remains while the banner covers the board. Min-of-anchors
+  rejected it. Do not drop that combination rule.
+- **No OCR.** Score/identity boxes look geometrically correct; values were
+  not read.
+- **M4 unlabelled live frames were not added** to this set.
+
 ## Next action
 
-M4 is complete for its intended scope. **Controlled real disruption/recovery
-remains unverified** and should not be claimed from the baseline gap or the
-broadcast-end stall. Milestone 5 (score OCR + trusted persisted score state)
-is not started.
+M5 is complete for its intended scope (cross-matchup presence detection on this
+channel). **Score OCR / trusted score state is not started.** Controlled real
+disruption/recovery remains unverified from M4.
 
-Explicitly **not** implied by M4 PASS: OCR, temporal scoreboard debouncing,
-schedule discovery, persistence, API, frontend.
+Explicitly **not** implied by M5 PASS: OCR, digit or logo recognition, opponent
+identification, temporal score validation, persistence, API, frontend.

@@ -8,12 +8,10 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 4 complete (PASS) — continuous live acquisition.** Frame
-ingestion, channel-bound calibration, single-frame scoreboard-presence
-detection, and long-running acquisition of one live watch URL exist. Baseline
-live sampling and normal broadcast-end were verified on real PRISM/YouTube
-streams; controlled disruption/recovery has not. No OCR, score reading, API,
-database, or frontend exists yet. See
+**Current milestone: 5 complete (PASS) — cross-matchup scoreboard detection.**
+The M3 detector, unchanged, recognized the calibrated Arcade scoreboard on four
+additional same-channel matchups (Chargers, Packers, Raiders, Vikings). Score
+OCR, API, database, and frontend do not exist yet. See
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ## Requirements
@@ -181,6 +179,8 @@ probe against a real URL and by the manual validation run:
 ```bash
 python tools/m3_fixture.py capture     # needs YouTube; writes to artifacts/
 python tools/m3_validate.py --sweep
+python tools/m5_fixture.py capture     # needs YouTube; four M5 recordings
+python tools/m5_validate.py
 ```
 
 ## Layout
@@ -198,11 +198,11 @@ src/lsgc/
                 imagery only - never yt-dlp or FFmpeg.
   vision/       scoreboard-presence detection: reference evidence,
                 detector, diagnostic overlay, CLI
-tools/          developer scripts for building and scoring the M3
-                validation set; need network, never run by pytest
+tools/          developer scripts for M3/M5 labelled-set capture and scoring;
+                need network, never run by pytest
 tests/
-  fixtures/     calibration profile, reference evidence and labelled
-                validation metadata for the M1 Madden recording
+  fixtures/     calibration profile, M3 reference, M3 and M5 labelled
+                validation metadata (no decoded frames)
 docs/implementation-status.md
 artifacts/      generated diagnostics, gitignored
 ```
