@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-20 (Milestone 1)
+Last updated: 2026-09-21 (Milestone 4 PASS)
 
 ## Product
 
@@ -32,7 +32,7 @@ No microservices, no Redis/Celery/Kafka/Kubernetes. None of this exists yet.
 | M1 | Real Madden recording ingestion + recorded-video sampling | **PASS, verified** |
 | M2 | Channel-bound calibration foundation | **PASS, verified** |
 | M3 | Calibrated scoreboard-presence detection | **PASS, verified** |
-| M4 | Continuous frame acquisition for a single live broadcast | Not started |
+| M4 | Continuous frame acquisition for a single live broadcast | **PASS, verified** |
 | M5 | Score OCR observations + trusted persisted score state | Not started |
 | M6 | API + persistence | Not started |
 | M7 | Frontend scoreboard and game pages | Not started |
@@ -86,13 +86,65 @@ actually visible, so later milestones never read scores off unrelated graphics.
 
 Single-frame only. No temporal debouncing, no OCR, no team or score reading.
 
+## M4 status: PASS
+
+Goal: keep one explicitly supplied live YouTube broadcast open and emit sampled
+`Frame` objects until the broadcast ends, the caller cancels, or retries are
+exhausted.
+
+- **SESSION API + STATE MACHINE: VERIFIED OFFLINE** (`lsgc.live.LiveFrameSession`)
+- **RECOVERY / RE-RESOLUTION: VERIFIED OFFLINE** (scripted resolver + decoder)
+- **DUPLICATE / ORIGIN-RESET HANDLING: VERIFIED OFFLINE**
+- **CANCELLATION: VERIFIED OFFLINE** (running and during backoff) **and** on the
+  1200s live duration bound
+- **M3 CONSUMER PATH: VERIFIED OFFLINE** and on live Frames
+- **BASELINE LIVE ACQUISITION: VERIFIED** (`PWw6gEH32bo`)
+- **NORMAL BROADCAST-END: VERIFIED** (`nI4DUFbEvrQ`)
+- **CONTROLLED DISRUPTION / RECOVERY: NOT YET VERIFIED** on a real stream
+
+These are three separate claims. Baseline acquisition and normal broadcast-end
+passed on user-controlled PRISM/YouTube livestreams. Controlled user-induced
+disruption/recovery has not been run and is **not** implied by either PASS.
+
+### Real live evidence
+
+**1. Baseline live acquisition — PASS** (`PWw6gEH32bo`, 1200s probe, interval 2s).
+Started while Madden was on the menu; user entered Madden 27 Arcade during the
+run. 586 frames (seq 0–585), ordered, no duplicates, skipped=0, failures=0.
+M3 consumed every live Frame. Menu seq 0–44 ABSENT, seq 45 first PRESENT
+(`conf +0.997`); later isolated ABSENT frames during gameplay were not visually
+explained by the log. No fatal acquisition failure. Duration bound cancelled
+cleanly (`final_state=cancelled`, process exit 0). Longest wall-clock gap
+**51.96s** at seq 173→174 with a **second watch-URL resolve** (epoch 1→2);
+frames then continued PRESENT. That gap is a spontaneous live-HLS stall /
+re-resolution during an otherwise uninterrupted run. **It is not a controlled
+reconnect test.**
+
+**2. Normal broadcast-end — PASS** (`nI4DUFbEvrQ`, `--duration 0`). Session
+first resolved `is_live=True`, reached RUNNING, and emitted 34 live frames.
+User ended PRISM/YouTube normally. Decoder stalled 30s after media stopped;
+session re-resolved the **same** stable watch URL (`resolves` 1→2); resolver
+observed `is_live=False`; session transitioned to **ENDED** without manual
+cancellation. FFmpeg/child cleanup succeeded. Diagnostics redacted CDN URLs
+(`<redacted-media-url>`). Broadcast end did not mark a game score final.
+
+**3. Controlled user-induced disruption/recovery — NOT YET VERIFIED.** Offline
+scripted recovery still holds. Do not treat the 51.96s baseline gap or the
+broadcast-end stall as that test.
+
+Health counters on these runs: `resolves` (`resolve_attempts`) counts watch-URL
+resolutions, including the initial resolve and later re-resolutions of the same
+stable URL. `reconnects` (`reconnect_count`) stayed **0** on both real live
+runs even when `resolves` went 1→2. Do not read `reconnects=0` as “no
+re-resolution occurred.”
+
 ## Verified commands
 
 ```bash
 # setup
 python3 -m venv .venv && ./.venv/bin/pip install -e ".[dev]"
 
-# tests (offline, 283 passed)
+# tests (offline, 315 passed)
 ./.venv/bin/python -m pytest
 
 # archived: 5/5 frames, 1280x720, pts 0.000-4.000s, exit 0
@@ -539,6 +591,85 @@ and recalibrating invalidates a stale reference rather than silently comparing
 the wrong pixels. `load_reference(path, expect_channel=...)` requires the
 channel, matching `load_profile`.
 
+## M4: continuous live acquisition
+
+`lsgc.live.LiveFrameSession` coordinates resolver + decoder for **one**
+explicitly supplied YouTube watch URL. The durable identity is that watch URL.
+Resolved googlevideo/HLS URLs are ephemeral and are never the session identity.
+The session does not import `lsgc.vision`; M3 consumes emitted `Frame`s.
+
+```python
+from lsgc.live import LiveFrameSession
+
+session = LiveFrameSession(watch_url, interval_s=2.0)
+for frame in session.frames():
+    result = detector.detect_frame(frame)   # optional; session does not know
+session.cancel()
+```
+
+### State machine
+
+`STARTING` → `RUNNING` → (`RECOVERING` → `RUNNING`)* → `ENDED` | `FAILED` | `CANCELLED`
+
+- **ENDED**: re-resolve shows the source is no longer live, or yt-dlp reports
+  the live event has ended. Acquisition stops. **This is not a game-final.**
+- **FAILED**: retry budget exhausted (`RetryPolicy.max_attempts`, default 8).
+- **CANCELLED**: caller `cancel()`, duration timer, or generator closed early.
+
+Health (`session.health`) is in-memory: frames emitted/skipped, resolve
+attempts, reconnects, consecutive failures, last PTS, longest inter-frame gap,
+sanitized last error. No database.
+
+`resolve_attempts` (printed `resolves=`) counts every watch-URL resolution:
+the initial resolve and later re-resolutions of the same stable URL.
+`reconnect_count` (printed `reconnects=`) is a narrower counter of replacing a
+working media connection after EOF or decode failure on a connection that had
+already succeeded. On the real live runs it stayed 0 even when `resolves` went
+from 1 to 2. Do not interpret `reconnects=0` as “no re-resolution occurred.”
+
+### Sampling
+
+Developer default **2.0s**, not a claimed optimum. FFmpeg `select` still does
+the cadence so we do not ingest every 60-fps frame. `iter_frames` (bounded,
+recorded seeking) is unchanged; live uses `iter_continuous_frames` (unbounded
+until EOF/cancel/stall).
+
+### Logical ordering and timestamps
+
+`Frame.timestamp_s` is still source PTS — live HLS media-timeline offset, **not**
+YouTube wall-clock. `Frame.received_at` is the only real-time clock.
+`Frame.index` is session-monotonic among **emitted** frames.
+
+After reconnect:
+
+- PTS that does not advance past the last emitted PTS is dropped (duplicate /
+  small reorder).
+- PTS that jumps backward by more than one sample interval is a new media
+  timeline origin (`source_epoch` increments) and is emitted as new
+  progression, not as rewound time.
+
+Downstream must not assume PTS is comparable across epochs.
+
+### Recovery
+
+On decode stall/error/EOF: backoff (1s, 2s, 4s, … cap 30s) and re-resolve the
+**same watch URL**. A successful emission resets the consecutive-failure
+counter. There is no tight infinite loop. Diagnostics redact googlevideo URLs,
+signatures, and cookie-like headers.
+
+A single FFmpeg EOF is **not** treated as broadcast-over. Only a subsequent
+resolve that is not live, or an explicit "live event has ended" resolver
+error, becomes ENDED. Ambiguous 403/timeout remains recoverable. Observed on
+`nI4DUFbEvrQ`: stall after the user ended the stream, then re-resolve of the
+same watch URL, `is_live=False`, ENDED.
+
+### Cancellation
+
+`session.cancel()` sets a thread-safe event. The decoder watchdog kills the
+FFmpeg child. Backoff waits are `Event.wait`, so they return promptly. No
+frames are emitted after cancel. Tests cover cancel while running and during
+backoff.
+
 ## Verified technical findings
 
 - **yt-dlp version is load-bearing.** The preinstalled system yt-dlp
@@ -594,8 +725,10 @@ delay.
 
 ## Known blockers and limitations
 
-- **One successful live test does not prove production reliability.** Untested:
-  multi-hour continuous capture, reconnect after segment gaps, resolution
+- **Two real live runs do not prove production reliability.** Verified: ~20
+  minutes of continuous sampling on `PWw6gEH32bo`, and RUNNING→ENDED on
+  `nI4DUFbEvrQ` after a normal PRISM/YouTube end. Still untested: multi-hour
+  capture, **controlled** reconnect after an induced disruption, resolution
   changes mid-broadcast, ad insertion, DVR-window behaviour, and datacenter IPs
   (cloud IP ranges attract bot checks far more than a residential IP).
 - **YouTube extraction is an adversarial moving target.** The 403 discovered
@@ -604,7 +737,8 @@ delay.
 - **PO tokens / cookies may become necessary** on other networks. Not required
   here. If ever added, cookie jars must stay gitignored and out of commits.
 - Live PTS is not broadcast wall-clock (see above).
-- The probe samples once and exits. Long-lived capture is M3.
+- Bounded `lsgc.probe` still samples once and exits. Continuous capture is
+  `lsgc.live` (M4, PASS).
 
 ### M1-specific limitations
 
@@ -658,18 +792,40 @@ delay.
 - The validation frames are gitignored, so `tools/m3_validate.py` needs a
   network capture step before it can run on a fresh clone.
 
+### M4-specific limitations
+
+- **Controlled user-induced disruption/recovery is not verified** on a real
+  stream. Offline tests cover re-resolution. The 51.96s gap on `PWw6gEH32bo`
+  (second resolve, then continuation) was spontaneous during baseline sampling,
+  not that test. The stall→re-resolve→ENDED path on `nI4DUFbEvrQ` is normal
+  broadcast-end handling, not an induced disruption.
+- **`reconnects` stayed 0** on both live runs while `resolves` went 1→2. Use
+  `resolves` for watch-URL re-resolution count; do not treat `reconnects` as
+  that count.
+- **Wall-clock delivery is bursty** on live HLS (typical ~5s catch-up gaps).
+  PTS stayed at 2.000s while frames were flowing. The 51.96s hole on the
+  20-minute run is the longest observed gap.
+- **Live DASH fragment lists are not followed.** Continuous decode uses the
+  playlist/media URL (YouTube live has been HLS in M0). If a live source is
+  only DASH segments, decode fails and the session re-resolves.
+- **PTS is still not wall-clock.** Session order is `Frame.index`, not PTS.
+- **Broadcast ENDED is not a final score.** M4 stops acquisition only.
+- **"Live event has ended" detection depends on yt-dlp wording** plus
+  `is_live=False` on re-resolve. Ambiguous 403s are retried, not treated as
+  ended. A **new** session against an already-ended URL (`PWw6gEH32bo` after
+  it had become VOD) failed as never-live rather than ENDED, which is the
+  designed never-saw-live path.
+- **Default 2s cadence is a developer default**, not a measured optimum.
+- **M3 labels on live frames are not a production accuracy estimate.** The
+  20-minute run used the M1 fixture profile against live PRISM output; ten
+  isolated ABSENT frames after gameplay started have no logged visual cause.
+
 ## Next action
 
-M4: turn the one-shot probe into a supervised, long-running capture loop for a
-single live broadcast — reconnect on segment gaps and stream restarts, sample
-at a fixed cadence for the length of a game, and record whether ingestion
-survives a multi-hour broadcast. It is the remaining ingestion unknown, it is
-independent of the vision work, and OCR is pointless without a feed that stays
-up. Explicitly **not** yet: OCR, temporal confirmation, persistence, API.
+M4 is complete for its intended scope. **Controlled real disruption/recovery
+remains unverified** and should not be claimed from the baseline gap or the
+broadcast-end stall. Milestone 5 (score OCR + trusted persisted score state)
+is not started.
 
-M1 identified and measured a representative Madden recording. M2 turned those
-measurements into a validated, versioned, channel-bound profile. M3 made that
-profile do real work: a single frame plus its channel's calibration now yields a
-present/absent verdict with per-anchor evidence, and the touchdown banner that
-motivated stable anchors is rejected because it does not match the calibrated
-structure — not because anything looks for the word "touchdown".
+Explicitly **not** implied by M4 PASS: OCR, temporal scoreboard debouncing,
+schedule discovery, persistence, API, frontend.

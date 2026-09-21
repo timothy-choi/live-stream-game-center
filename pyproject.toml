@@ -27,6 +27,7 @@ dev = ["pytest>=8.0"]
 lsgc-probe = "lsgc.probe:main"
 lsgc-calibrate = "lsgc.calibration.cli:main"
 lsgc-detect = "lsgc.vision.cli:main"
+lsgc-live-probe = "lsgc.live.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

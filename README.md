@@ -8,10 +8,11 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 3 — calibrated scoreboard-presence detection.** Frame
-ingestion works, a calibration profile records where a given channel draws its
-scoreboard, and the backend can now tell from a single frame whether that
-scoreboard is actually visible. No OCR, score reading, team recognition, API,
+**Current milestone: 4 complete (PASS) — continuous live acquisition.** Frame
+ingestion, channel-bound calibration, single-frame scoreboard-presence
+detection, and long-running acquisition of one live watch URL exist. Baseline
+live sampling and normal broadcast-end were verified on real PRISM/YouTube
+streams; controlled disruption/recovery has not. No OCR, score reading, API,
 database, or frontend exists yet. See
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
@@ -144,6 +145,28 @@ Detection is per frame and per channel. There is no cross-frame smoothing, no
 OCR, and the threshold was measured against one channel's calibration rather
 than assumed to be universal.
 
+## Continuous live acquisition
+
+`LiveFrameSession` keeps one YouTube **watch URL** open and yields sampled
+`Frame`s until the broadcast ends, the caller cancels, or retries are
+exhausted. Resolved CDN URLs are ephemeral; the watch URL is what gets
+re-resolved after a stall.
+
+```bash
+# bounded developer run (default 15 minutes). Optional M3 classification:
+./.venv/bin/python -m lsgc.live_probe "YOUTUBE_WATCH_URL" \
+    --interval 2 --duration 900 \
+    --profile tests/fixtures/m1_fixture_profile.json \
+    --reference tests/fixtures/m3_reference.json \
+    --expect-channel UCz3q0f-dMPNIyQhntPTE7gQ
+```
+
+`--duration 0` runs until the broadcast ends or you interrupt. Ending
+acquisition does **not** mark a game score final. Diagnostics never print
+signed media URLs.
+
+The 2-second default cadence is a developer default, not a measured optimum.
+
 ## Tests
 
 ```bash
@@ -166,8 +189,10 @@ python tools/m3_validate.py --sweep
 src/lsgc/
   models.py     Frame and MediaSource: the contracts between layers
   resolver.py   YouTube URL -> playable media URL (the only yt-dlp consumer)
-  decoder.py    media URL -> bounded stream of decoded frames
-  probe.py      ingestion CLI
+  decoder.py    media URL -> bounded or continuous sampled frames
+  probe.py      bounded ingestion CLI
+  live/         continuous session for one live watch URL + live_probe CLI
+  live_probe.py python -m lsgc.live_probe entry
   calibration/  channel-bound scoreboard geometry: model, validation,
                 JSON storage, overlay, authoring CLI. Consumes frame
                 imagery only - never yt-dlp or FFmpeg.

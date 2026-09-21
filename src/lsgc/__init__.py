@@ -1,8 +1,9 @@
 """Live Stream Game Center - backend video ingestion and scoreboard calibration.
 
-Ingestion (`lsgc.resolver`, `lsgc.decoder`) turns a YouTube URL into `Frame`
-objects without a browser. Calibration (`lsgc.calibration`) records where a
-given channel draws its scoreboard. Nothing here performs detection or OCR yet.
+Ingestion turns a YouTube URL into `Frame` objects without a browser.
+`lsgc.live` keeps that pipeline open for one live broadcast. Calibration
+records where a channel draws its scoreboard; vision classifies presence.
+Nothing here performs OCR yet.
 """
 
 from lsgc.errors import DecodeError, IngestionError, SourceResolutionError

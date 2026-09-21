@@ -9,7 +9,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from lsgc.decoder import iter_frames, probe_media
+from lsgc.decoder import iter_continuous_frames, iter_frames, probe_media
 from lsgc.errors import DecodeError
 from lsgc.models import MediaSource
 
@@ -72,3 +72,27 @@ def test_missing_media_raises_decode_error(tmp_path) -> None:
 def test_count_must_be_positive(local_source: MediaSource) -> None:
     with pytest.raises(ValueError):
         list(iter_frames(local_source, count=0))
+
+
+def test_continuous_decode_stops_on_cancel(local_source: MediaSource) -> None:
+    import threading
+
+    cancel = threading.Event()
+    frames = []
+    for frame in iter_continuous_frames(
+        local_source, interval_s=0.2, cancel=cancel, stall_timeout_s=10.0
+    ):
+        frames.append(frame)
+        if len(frames) >= 3:
+            cancel.set()
+    assert len(frames) == 3
+    assert [f.index for f in frames] == [0, 1, 2]
+
+
+def test_continuous_decode_eof_after_frames(local_source: MediaSource) -> None:
+    """A finite local file ends the generator without becoming a hard error."""
+    frames = list(
+        iter_continuous_frames(local_source, interval_s=1.0, stall_timeout_s=10.0)
+    )
+    assert len(frames) >= 2
+    assert frames[0].is_live is False

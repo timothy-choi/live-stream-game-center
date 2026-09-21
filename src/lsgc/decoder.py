@@ -14,6 +14,7 @@ import shutil
 import ssl
 import subprocess
 import threading
+import time
 import urllib.error
 import urllib.request
 from collections.abc import Iterator
@@ -352,6 +353,137 @@ def iter_frames(
         raise DecodeError(
             f"FFmpeg produced no frames (requested offset {start}s; the source may be "
             f"shorter than that). " + _tail(stderr_lines, lock)
+        )
+
+
+def iter_continuous_frames(
+    source: MediaSource,
+    *,
+    interval_s: float = 2.0,
+    cancel: threading.Event | None = None,
+    stall_timeout_s: float = 30.0,
+) -> Iterator[Frame]:
+    """Yield sampled frames from a live (or local) source until it ends.
+
+    Unlike `iter_frames` this is not bounded by a frame count. Sampling is
+    still done by FFmpeg's `select` filter so we do not decode every 60-fps
+    frame. The generator returns when:
+
+    - the media connection ends (FFmpeg EOF) after producing at least one
+      frame — the caller should re-resolve the *watch URL*, not treat this as
+      the broadcast itself having ended;
+    - `cancel` is set — the FFmpeg child is killed and iteration stops
+      without an exception;
+    - no frame arrives for `stall_timeout_s` — `DecodeError`;
+    - FFmpeg produces zero frames — `DecodeError`.
+
+    Recorded seeking (`start_at`) is intentionally unsupported here so this
+    path cannot change M1's seek semantics. Live DASH fragment snapshots are
+    not followed; the playlist/media URL is used as-is (YouTube live is HLS).
+    """
+    if interval_s < 0 or interval_s != interval_s:
+        raise ValueError(f"interval_s must be >= 0, got {interval_s!r}")
+    if stall_timeout_s <= 0:
+        raise ValueError(f"stall_timeout_s must be > 0, got {stall_timeout_s!r}")
+    if cancel is not None and cancel.is_set():
+        return
+
+    info = probe_media(source)
+    width, height = info["width"], info["height"]
+    frame_bytes = width * height * 3
+
+    cmd = [_require("ffmpeg"), "-hide_banner", "-nostdin", "-loglevel", "info"]
+    cmd += ["-rw_timeout", "15000000"]
+    cmd += ["-copyts"]
+    cmd += _header_args(source)
+    cmd += ["-i", source.media_url]
+    cmd += ["-an", "-sn", "-vf", _sample_filter(0.0, interval_s)]
+    cmd += ["-vsync", "0"]
+    cmd += ["-f", "rawvideo", "pipe:1"]
+
+    process = subprocess.Popen(
+        cmd, stdout=subprocess.PIPE, stderr=subprocess.PIPE, stdin=subprocess.DEVNULL
+    )
+
+    timestamps: dict[int, float] = {}
+    stderr_lines: list[str] = []
+    lock = threading.Lock()
+    last_progress = [time.monotonic()]
+    flags = {"stalled": False, "cancelled": False}
+
+    def drain_stderr() -> None:
+        assert process.stderr is not None
+        for raw in process.stderr:
+            line = raw.decode("utf-8", "replace").rstrip()
+            with lock:
+                stderr_lines.append(line)
+                if len(stderr_lines) > 200:
+                    del stderr_lines[:100]
+                if (match := _SHOWINFO.search(line)) and "showinfo" in line:
+                    timestamps[int(match.group(1))] = float(match.group(2))
+
+    def watch() -> None:
+        while process.poll() is None:
+            if cancel is not None and cancel.is_set():
+                flags["cancelled"] = True
+                process.kill()
+                return
+            if time.monotonic() - last_progress[0] > stall_timeout_s:
+                flags["stalled"] = True
+                process.kill()
+                return
+            time.sleep(0.05)
+
+    reader = threading.Thread(target=drain_stderr, daemon=True)
+    watcher = threading.Thread(target=watch, daemon=True)
+    reader.start()
+    watcher.start()
+
+    delivered = 0
+    try:
+        assert process.stdout is not None
+        while True:
+            if cancel is not None and cancel.is_set():
+                flags["cancelled"] = True
+                break
+            buffer = process.stdout.read(frame_bytes)
+            if not buffer or len(buffer) < frame_bytes:
+                break
+            last_progress[0] = time.monotonic()
+            image = np.frombuffer(buffer, dtype=np.uint8).reshape(height, width, 3).copy()
+            yield Frame(
+                index=delivered,
+                image=image,
+                width=width,
+                height=height,
+                timestamp_s=_await_timestamp(timestamps, delivered, lock),
+                source_url=source.source_url,
+                source_id=source.source_id,
+                is_live=source.is_live,
+                received_at=datetime.now(UTC),
+                extra={
+                    "codec": info["codec"],
+                    "avg_frame_rate": info["avg_frame_rate"],
+                    "format_id": source.format_id,
+                    "protocol": source.protocol,
+                },
+            )
+            delivered += 1
+    finally:
+        _shutdown(process)
+        reader.join(timeout=2.0)
+        watcher.join(timeout=2.0)
+
+    if flags["cancelled"]:
+        return
+    if flags["stalled"]:
+        raise DecodeError(
+            f"Live decode stalled for {stall_timeout_s}s after {delivered} frames. "
+            + _tail(stderr_lines, lock)
+        )
+    if delivered == 0:
+        raise DecodeError(
+            "FFmpeg produced no frames from the live source. " + _tail(stderr_lines, lock)
         )
 
 
