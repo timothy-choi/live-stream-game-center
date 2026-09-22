@@ -162,6 +162,16 @@ h2 {
   color: var(--ended);
 }
 
+.badge-finalizing {
+  background: #5a3d12;
+  color: #ffd089;
+}
+
+.badge-final {
+  background: #14532d;
+  color: #bbf7d0;
+}
+
 .review-flag {
   font-size: 0.78rem;
   color: var(--warn);

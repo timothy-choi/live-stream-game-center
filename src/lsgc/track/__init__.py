@@ -12,6 +12,7 @@ from lsgc.track.models import (
     ApplyResult,
     CandidateScore,
     ConfirmedScoreChange,
+    ScoreProvenance,
     TrustedScoreState,
 )
 from lsgc.track.policy import ConfirmationPolicy, M4_DEFAULT_INTERVAL_S
@@ -25,6 +26,7 @@ __all__ = [
     "ConfirmationPolicy",
     "ConfirmedScoreChange",
     "PolicyError",
+    "ScoreProvenance",
     "RestoreError",
     "TemporalScoreValidator",
     "TrackError",

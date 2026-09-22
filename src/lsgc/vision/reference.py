@@ -23,14 +23,24 @@ import json
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Protocol
 
 import cv2
 import numpy as np
 
 from lsgc.calibration.geometry import Region
-from lsgc.calibration.profile import CalibrationProfile
 from lsgc.vision.errors import ReferenceMismatchError, ReferenceSchemaError
+
+
+class AnchorLayout(Protocol):
+    """Geometry that names stable anchors. Shared by scoreboard and finalization."""
+
+    channel_id: str
+    profile_id: str
+    revision: int
+    stable_anchors: tuple[Region, ...]
+
+    def for_frame_size(self, width: int, height: int) -> AnchorLayout: ...
 
 REFERENCE_SCHEMA_VERSION = 1
 """Version of the reference file format, independent of the profile's own
@@ -122,7 +132,7 @@ class ScoreboardReference:
                 f"this build reads version {REFERENCE_SCHEMA_VERSION}."
             )
 
-    def assert_matches(self, profile: CalibrationProfile) -> None:
+    def assert_matches(self, profile: AnchorLayout) -> None:
         """Verify this reference was built for exactly this calibration.
 
         Checks channel, lineage, revision and anchor geometry. Any of these
@@ -180,7 +190,7 @@ class ScoreboardReference:
 
 def build_reference(
     images: list[np.ndarray],
-    profile: CalibrationProfile,
+    profile: AnchorLayout,
     *,
     notes: str = "",
     created_at: datetime | None = None,

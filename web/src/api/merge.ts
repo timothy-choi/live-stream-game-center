@@ -29,12 +29,27 @@ function newerMatchup(current: MatchupSummary, incoming: MatchupSummary): Matchu
   return incoming;
 }
 
+function completionRank(status: string | undefined): number {
+  if (status === "FINAL") {
+    return 2;
+  }
+  if (status === "FINALIZING") {
+    return 1;
+  }
+  return 0;
+}
+
 export function mergeGame(current: GameSummary | null, incoming: GameSummary): GameSummary {
   if (!current) {
     return incoming;
   }
+  const completion =
+    completionRank(incoming.completion_status) >= completionRank(current.completion_status)
+      ? incoming.completion_status
+      : current.completion_status;
   return {
     ...incoming,
+    completion_status: completion,
     score: newerScore(current.score, incoming.score),
     matchup: newerMatchup(current.matchup, incoming.matchup),
   };

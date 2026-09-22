@@ -14,6 +14,8 @@ from lsgc.persist.errors import (
     UnknownGameError,
 )
 from lsgc.persist.notify import (
+    KIND_COMPLETION_CHANGED,
+    KIND_FINAL_SCORE_CONFLICT,
     KIND_MATCHUP_CONFIRMED,
     KIND_MATCHUP_CONFLICT,
     KIND_PLATFORM_LIFECYCLE_CHANGED,
@@ -23,11 +25,14 @@ from lsgc.persist.notify import (
     emit_game_change,
 )
 from lsgc.persist.models import (
+    CompletionStatus,
     Game,
+    HistoryCompleteness,
     MatchupPersistResult,
     PersistOutcome,
     PersistResult,
     PlatformLifecycle,
+    RecoveryStatus,
     ScoreChangeRecord,
     TrackingStatus,
 )
@@ -344,6 +349,143 @@ class InMemoryGameRepository:
         )
         self._games[game_id] = updated
         emit_game_change(self._publisher, KIND_TRACKING_STATUS_CHANGED, updated)
+        return updated
+
+    def enter_finalizing(
+        self,
+        game_id: UUID,
+        *,
+        confirmed_timestamp_s: float | None,
+        confirmed_frame_index: int | None,
+        deadline_at: datetime,
+        started_at: datetime | None = None,
+    ) -> Game:
+        game = self.get_game(game_id)
+        if game.completion_status in {CompletionStatus.FINAL, CompletionStatus.FINALIZING}:
+            return game
+        now = datetime.now(tz=UTC)
+        updated = self._replace(
+            game,
+            completion_status=CompletionStatus.FINALIZING,
+            completion_confirmed_at=now,
+            completion_confirmed_timestamp_s=confirmed_timestamp_s,
+            completion_confirmed_frame_index=confirmed_frame_index,
+            finalizing_started_at=started_at or now,
+            finalizing_deadline_at=deadline_at,
+            updated_at=now,
+        )
+        self._games[game_id] = updated
+        emit_game_change(self._publisher, KIND_COMPLETION_CHANGED, updated)
+        return updated
+
+    def record_postgame_score(
+        self,
+        game_id: UUID,
+        *,
+        left: int,
+        right: int,
+        confirmed_timestamp_s: float | None,
+        conflict: str | None = None,
+        reset_stability: bool = False,
+        stable_timestamp_s: float | None = None,
+    ) -> Game:
+        game = self.get_game(game_id)
+        if game.completion_status is CompletionStatus.FINAL:
+            return game
+        now = datetime.now(tz=UTC)
+        if conflict:
+            stable_at = None
+            stable_ts = None
+        elif reset_stability or game.score_stable_since_at is None:
+            stable_at = now
+            stable_ts = stable_timestamp_s
+        else:
+            stable_at = game.score_stable_since_at
+            stable_ts = game.score_stable_since_timestamp_s
+        updated = self._replace(
+            game,
+            postgame_left_score=left,
+            postgame_right_score=right,
+            postgame_confirmed_at=now,
+            postgame_confirmed_timestamp_s=confirmed_timestamp_s,
+            final_score_conflict=conflict,
+            score_stable_since_at=stable_at,
+            score_stable_since_timestamp_s=stable_ts,
+            updated_at=now,
+        )
+        self._games[game_id] = updated
+        kind = KIND_FINAL_SCORE_CONFLICT if conflict else KIND_COMPLETION_CHANGED
+        emit_game_change(self._publisher, kind, updated)
+        return updated
+
+    def record_recovery_status(
+        self,
+        game_id: UUID,
+        *,
+        recovery_status: RecoveryStatus,
+        score_history_completeness: HistoryCompleteness | None = None,
+    ) -> Game:
+        game = self.get_game(game_id)
+        if game.completion_status is CompletionStatus.FINAL:
+            return game
+        now = datetime.now(tz=UTC)
+        completeness = (
+            game.score_history_completeness
+            if score_history_completeness is None
+            else score_history_completeness
+        )
+        updated = self._replace(
+            game,
+            recovery_status=recovery_status,
+            score_history_completeness=completeness,
+            updated_at=now,
+        )
+        self._games[game_id] = updated
+        emit_game_change(self._publisher, KIND_COMPLETION_CHANGED, updated)
+        return updated
+
+    def mark_score_stable(
+        self,
+        game_id: UUID,
+        *,
+        timestamp_s: float | None,
+    ) -> Game:
+        game = self.get_game(game_id)
+        if game.score_stable_since_at is not None:
+            return game
+        now = datetime.now(tz=UTC)
+        updated = self._replace(
+            game,
+            score_stable_since_at=now,
+            score_stable_since_timestamp_s=timestamp_s,
+            updated_at=now,
+        )
+        self._games[game_id] = updated
+        return updated
+
+    def mark_final(self, game_id: UUID) -> Game:
+        game = self.get_game(game_id)
+        if game.completion_status is CompletionStatus.FINAL:
+            return game
+        if game.completion_status is not CompletionStatus.FINALIZING:
+            raise SchemaError("FINAL requires completion_status FINALIZING")
+        if game.final_score_conflict:
+            raise SchemaError("FINAL is forbidden while a final-score conflict exists")
+        if game.postgame_pair is None:
+            raise SchemaError("FINAL requires a confirmed postgame score")
+        if game.pair != game.postgame_pair:
+            raise SchemaError(
+                "FINAL requires durable trusted score to equal confirmed postgame score"
+            )
+        now = datetime.now(tz=UTC)
+        updated = self._replace(
+            game,
+            completion_status=CompletionStatus.FINAL,
+            final_score_verified=True,
+            updated_at=now,
+        )
+        self._games[game_id] = updated
+        emit_game_change(self._publisher, KIND_COMPLETION_CHANGED, updated)
         return updated
 
     def assert_current_matches_history(self, game_id: UUID) -> None:

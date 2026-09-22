@@ -2,6 +2,16 @@ export type ScoreStatus = "UNCONFIRMED" | "TRUSTED";
 export type MatchupStatus = "UNCONFIRMED" | "CONFIRMED" | "CONFLICT";
 export type PlatformLifecycle = "UNKNOWN" | "UPCOMING" | "LIVE" | "ENDED";
 export type TrackingStatus = "TRACKING" | "ACQUISITION_ENDED";
+export type CompletionStatus = "UNVERIFIED" | "FINALIZING" | "FINAL";
+export type RecoveryStatus =
+  | "IDLE"
+  | "RECOVERING"
+  | "NOT_NEEDED"
+  | "COMPLETE"
+  | "PARTIAL"
+  | "UNAVAILABLE"
+  | "CONFLICT";
+export type HistoryCompleteness = "UNKNOWN" | "COMPLETE" | "PARTIAL" | "UNAVAILABLE";
 
 export type GameEventType =
   | "GAME_SNAPSHOT"
@@ -10,6 +20,8 @@ export type GameEventType =
   | "MATCHUP_CONFLICT"
   | "PLATFORM_LIFECYCLE_CHANGED"
   | "TRACKING_STATUS_CHANGED"
+  | "COMPLETION_CHANGED"
+  | "FINAL_SCORE_CONFLICT"
   | "RESYNC_REQUIRED";
 
 export interface TeamSummary {
@@ -53,6 +65,13 @@ export interface GameSummary {
   actual_end_at: string | null;
   matchup: MatchupSummary;
   score: ScoreSummary;
+  completion_status?: CompletionStatus | string;
+  final_score_verified?: boolean;
+  postgame_left?: number | null;
+  postgame_right?: number | null;
+  final_score_conflict?: string | null;
+  recovery_status?: RecoveryStatus | string;
+  score_history_completeness?: HistoryCompleteness | string;
   last_updated_at: string;
   cursor: string;
 }
@@ -72,6 +91,8 @@ export interface ScoreTimelineEvent {
   right: number;
   initialization: boolean;
   confirmed_at: string;
+  observed_timestamp_s?: number | null;
+  source?: string;
 }
 
 export interface ScoreTimelineResponse {

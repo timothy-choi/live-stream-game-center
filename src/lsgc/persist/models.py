@@ -27,6 +27,40 @@ class TrackingStatus(str, Enum):
     """M4 acquisition ended. Trusted score is frozen. Not FINAL."""
 
 
+class CompletionStatus(str, Enum):
+    """Visual game-completion lifecycle. Independent of YouTube UPCOMING/LIVE/ENDED."""
+
+    UNVERIFIED = "UNVERIFIED"
+    """No temporally confirmed completed-game screen. Latest tracked score is not FINAL."""
+
+    FINALIZING = "FINALIZING"
+    """Completed-game screen confirmed. Final score is being read/reconciled."""
+
+    FINAL = "FINAL"
+    """Durable score already equals the verified postgame score."""
+
+
+class RecoveryStatus(str, Enum):
+    """Whether missed gameplay transitions were recovered from video."""
+
+    IDLE = "IDLE"
+    RECOVERING = "RECOVERING"
+    NOT_NEEDED = "NOT_NEEDED"
+    COMPLETE = "COMPLETE"
+    PARTIAL = "PARTIAL"
+    UNAVAILABLE = "UNAVAILABLE"
+    CONFLICT = "CONFLICT"
+
+
+class HistoryCompleteness(str, Enum):
+    """Whether every intermediate scoreboard transition is known."""
+
+    UNKNOWN = "UNKNOWN"
+    COMPLETE = "COMPLETE"
+    PARTIAL = "PARTIAL"
+    UNAVAILABLE = "UNAVAILABLE"
+
+
 class PlatformLifecycle(str, Enum):
     """YouTube/platform broadcast lifecycle. Not an acquisition state and not FINAL."""
 
@@ -79,12 +113,34 @@ class Game:
     matchup_right_method: str | None = None
     matchup_conflict_count: int = 0
     last_matchup_conflict: str | None = None
+    completion_status: CompletionStatus = CompletionStatus.UNVERIFIED
+    completion_confirmed_at: datetime | None = None
+    completion_confirmed_timestamp_s: float | None = None
+    completion_confirmed_frame_index: int | None = None
+    finalizing_started_at: datetime | None = None
+    finalizing_deadline_at: datetime | None = None
+    postgame_left_score: int | None = None
+    postgame_right_score: int | None = None
+    postgame_confirmed_at: datetime | None = None
+    postgame_confirmed_timestamp_s: float | None = None
+    final_score_verified: bool = False
+    final_score_conflict: str | None = None
+    score_stable_since_at: datetime | None = None
+    score_stable_since_timestamp_s: float | None = None
+    recovery_status: RecoveryStatus = RecoveryStatus.IDLE
+    score_history_completeness: HistoryCompleteness = HistoryCompleteness.UNKNOWN
 
     @property
     def pair(self) -> tuple[int, int] | None:
         if self.trusted_left_score is None or self.trusted_right_score is None:
             return None
         return (self.trusted_left_score, self.trusted_right_score)
+
+    @property
+    def postgame_pair(self) -> tuple[int, int] | None:
+        if self.postgame_left_score is None or self.postgame_right_score is None:
+            return None
+        return (self.postgame_left_score, self.postgame_right_score)
 
     def trusted_state(self) -> TrustedScoreState:
         """Snapshot for M7 restore. Runtime observation cursors stay empty."""

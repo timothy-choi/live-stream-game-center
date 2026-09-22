@@ -8,9 +8,20 @@ from typing import Protocol
 
 from lsgc.calibration.profile import CalibrationProfile
 from lsgc.calibration.storage import load_profile
+from lsgc.finalize.profile import FinalizationProfile
+from lsgc.finalize.storage import load_finalization_profile
 from lsgc.identity.logos import LogoTemplateSet, load_logo_templates
 from lsgc.score.glyphs import DigitGlyphSet, load_glyphs
 from lsgc.vision.reference import ScoreboardReference, load_reference
+
+
+_NON_PROFILE_JSON = {
+    "reference.json",
+    "glyphs.json",
+    "logos.json",
+    "finalization.json",
+    "final_reference.json",
+}
 
 
 @dataclass(frozen=True)
@@ -19,6 +30,8 @@ class ChannelCalibration:
     reference: ScoreboardReference
     glyphs: DigitGlyphSet
     logos: LogoTemplateSet | None = None
+    finalization: FinalizationProfile | None = None
+    final_reference: ScoreboardReference | None = None
 
 
 class CalibrationLookup(Protocol):
@@ -60,6 +73,8 @@ class FilesystemCalibrationLookup:
             return None
         loaded: list[CalibrationProfile] = []
         for path in sorted(directory.glob("*.json")):
+            if path.name in _NON_PROFILE_JSON:
+                continue
             try:
                 loaded.append(load_profile(path, expect_channel=channel_id))
             except Exception:
@@ -86,6 +101,27 @@ class FilesystemCalibrationLookup:
                 logos.assert_matches(profile)
             except Exception:
                 return None
+        finalization = None
+        final_reference = None
+        finalization_path = directory / "finalization.json"
+        final_reference_path = directory / "final_reference.json"
+        if finalization_path.is_file() and final_reference_path.is_file():
+            try:
+                finalization = load_finalization_profile(
+                    finalization_path, expect_channel=channel_id
+                )
+                final_reference = load_reference(
+                    final_reference_path, expect_channel=channel_id
+                )
+                final_reference.assert_matches(finalization)
+            except Exception:
+                finalization = None
+                final_reference = None
         return ChannelCalibration(
-            profile=profile, reference=reference, glyphs=glyphs, logos=logos
+            profile=profile,
+            reference=reference,
+            glyphs=glyphs,
+            logos=logos,
+            finalization=finalization,
+            final_reference=final_reference,
         )

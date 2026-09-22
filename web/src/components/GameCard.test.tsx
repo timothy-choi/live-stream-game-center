@@ -44,6 +44,46 @@ test("ended latest trusted score is not FINAL", () => {
   expect(screen.queryByText("FINAL")).not.toBeInTheDocument();
 });
 
+test("finalizing shows verifying copy without claiming FINAL", () => {
+  show({
+    ...endedGame,
+    completion_status: "FINALIZING",
+    platform_lifecycle: "LIVE",
+    tracking_status: "TRACKING",
+  });
+  expect(screen.getByText("FINALIZING")).toBeInTheDocument();
+  expect(screen.getByText("VERIFYING FINAL SCORE")).toBeInTheDocument();
+  expect(screen.queryByText("FINAL")).not.toBeInTheDocument();
+  expect(screen.queryByText("Latest tracked score")).not.toBeInTheDocument();
+});
+
+test("finalizing shows recovering copy while video is rescanned", () => {
+  show({
+    ...endedGame,
+    completion_status: "FINALIZING",
+    recovery_status: "RECOVERING",
+    platform_lifecycle: "LIVE",
+    tracking_status: "TRACKING",
+  });
+  expect(screen.getByText("FINALIZING")).toBeInTheDocument();
+  expect(screen.getByText("Recovering missed scoring...")).toBeInTheDocument();
+  expect(screen.queryByText("FINAL")).not.toBeInTheDocument();
+});
+
+test("verified final is distinct from YouTube ENDED", () => {
+  show({
+    ...endedGame,
+    platform_lifecycle: "ENDED",
+    completion_status: "FINAL",
+    final_score_verified: true,
+    postgame_left: 28,
+    postgame_right: 17,
+  });
+  expect(screen.getByText("FINAL")).toBeInTheDocument();
+  expect(screen.queryByText("Latest tracked score")).not.toBeInTheDocument();
+  expect(screen.getByText("28")).toBeInTheDocument();
+});
+
 test("matchup conflict keeps confirmed teams", () => {
   show(conflictGame);
   expect(screen.getByText("Identity needs review")).toBeInTheDocument();

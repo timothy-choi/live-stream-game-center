@@ -1,6 +1,6 @@
 import { Link } from "react-router-dom";
 import type { GameSummary } from "../api/types";
-import { formatUtc, scoreLabel, teamLabel, trackingHint } from "../display";
+import { formatUtc, scoreLabel, teamLabel, trackingHint, badgeKind, endedUnverifiedNote } from "../display";
 import { StatusBadge } from "./StatusBadge";
 
 interface Props {
@@ -14,15 +14,12 @@ export function GameCard({ game }: Props) {
   const rightScore = scoreLabel(game.score.right, game.score.status);
   const tracking = trackingHint(game);
   const scheduled = formatUtc(game.scheduled_start_at);
-  const endedNote =
-    game.platform_lifecycle === "ENDED" && game.score.status === "TRUSTED"
-      ? "Latest tracked score"
-      : null;
+  const endedNote = endedUnverifiedNote(game);
 
   return (
     <Link className="game-card" to={`/games/${game.id}`}>
       <div className="card-top">
-        <StatusBadge lifecycle={game.platform_lifecycle} />
+        <StatusBadge lifecycle={badgeKind(game)} />
         {game.matchup.status === "CONFLICT" ? (
           <span className="review-flag">Identity needs review</span>
         ) : null}

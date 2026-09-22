@@ -33,6 +33,7 @@ class EligibilityReason(str, Enum):
     TRACKING_DISABLED = "tracking_disabled"
     MISSING_CALIBRATION = "missing_calibration"
     WRONG_CHANNEL = "wrong_channel"
+    ALREADY_FINAL = "already_final"
 
 
 class WorkerOutcome(str, Enum):

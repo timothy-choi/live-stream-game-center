@@ -18,9 +18,26 @@ export function ScoreTimeline({ events, loading = false, error = null }: Props) 
       ) : null}
       {events.length > 0 ? (
         <ol className="timeline">
-          {events.map((event) => (
+          {[...events]
+            .sort((left, right) => {
+              const leftTime = left.observed_timestamp_s;
+              const rightTime = right.observed_timestamp_s;
+              if (leftTime != null && rightTime != null && leftTime !== rightTime) {
+                return leftTime - rightTime;
+              }
+              return left.revision - right.revision;
+            })
+            .map((event) => (
             <li key={event.revision}>
-              <span className="timeline-kind">{event.initialization ? "Start" : "Update"}</span>
+              <span className="timeline-kind">
+                {event.source === "POSTGAME_FINAL"
+                  ? "Postgame"
+                  : event.source === "RECOVERED_GAMEPLAY_SCOREBOARD"
+                    ? "Recovered"
+                    : event.initialization
+                      ? "Start"
+                      : "Update"}
+              </span>
               <span className="timeline-score">
                 {event.left} – {event.right}
               </span>

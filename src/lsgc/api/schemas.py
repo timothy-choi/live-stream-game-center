@@ -26,6 +26,8 @@ class GameEventType(str, Enum):
     MATCHUP_CONFLICT = "MATCHUP_CONFLICT"
     PLATFORM_LIFECYCLE_CHANGED = "PLATFORM_LIFECYCLE_CHANGED"
     TRACKING_STATUS_CHANGED = "TRACKING_STATUS_CHANGED"
+    COMPLETION_CHANGED = "COMPLETION_CHANGED"
+    FINAL_SCORE_CONFLICT = "FINAL_SCORE_CONFLICT"
     RESYNC_REQUIRED = "RESYNC_REQUIRED"
 
 
@@ -80,6 +82,13 @@ class GameSummary(BaseModel):
     actual_end_at: str | None = None
     matchup: MatchupSummary
     score: ScoreSummary
+    completion_status: str = "UNVERIFIED"
+    final_score_verified: bool = False
+    postgame_left: int | None = None
+    postgame_right: int | None = None
+    final_score_conflict: str | None = None
+    recovery_status: str = "IDLE"
+    score_history_completeness: str = "UNKNOWN"
     last_updated_at: str
     cursor: str
 
@@ -103,6 +112,8 @@ class ScoreTimelineEvent(BaseModel):
     right: int
     initialization: bool
     confirmed_at: str
+    observed_timestamp_s: float | None = None
+    source: str = "GAMEPLAY_SCOREBOARD"
 
 
 class ScoreTimelineResponse(BaseModel):

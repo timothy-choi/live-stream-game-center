@@ -43,7 +43,8 @@ def game_cursor(game: Game) -> str:
     return (
         f"{game.score_revision}:{game.matchup_revision}:{game.matchup_conflict_count}:"
         f"{game.platform_lifecycle.value}:{game.tracking_status.value}:"
-        f"{int(game.tracking_enabled)}"
+        f"{int(game.tracking_enabled)}:{game.completion_status.value}:"
+        f"{game.recovery_status.value}:{game.score_history_completeness.value}"
     )
 
 
@@ -115,6 +116,13 @@ def game_summary(game: Game, catalog: TeamCatalog) -> GameSummary:
         actual_end_at=utc_iso(game.actual_end_at),
         matchup=matchup_summary(game, catalog),
         score=score_summary(game),
+        completion_status=game.completion_status.value,
+        final_score_verified=game.final_score_verified,
+        postgame_left=game.postgame_left_score,
+        postgame_right=game.postgame_right_score,
+        final_score_conflict=game.final_score_conflict,
+        recovery_status=game.recovery_status.value,
+        score_history_completeness=game.score_history_completeness.value,
         last_updated_at=require_utc_iso(game.updated_at),
         cursor=game_cursor(game),
     )
@@ -130,4 +138,6 @@ def timeline_event(record: ScoreChangeRecord) -> ScoreTimelineEvent:
         right=change.new_right,
         initialization=change.initialization,
         confirmed_at=require_utc_iso(record.persisted_at),
+        observed_timestamp_s=change.confirmed_timestamp_s,
+        source=change.source.value,
     )

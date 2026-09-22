@@ -140,6 +140,26 @@ class PooledGameRepository:
         with self._repo() as repo:
             return repo.record_worker_finished(game_id, **kwargs)
 
+    def enter_finalizing(self, game_id: UUID, **kwargs: Any) -> Game:
+        with self._repo() as repo:
+            return repo.enter_finalizing(game_id, **kwargs)
+
+    def record_postgame_score(self, game_id: UUID, **kwargs: Any) -> Game:
+        with self._repo() as repo:
+            return repo.record_postgame_score(game_id, **kwargs)
+
+    def record_recovery_status(self, game_id: UUID, **kwargs: Any) -> Game:
+        with self._repo() as repo:
+            return repo.record_recovery_status(game_id, **kwargs)
+
+    def mark_score_stable(self, game_id: UUID, **kwargs: Any) -> Game:
+        with self._repo() as repo:
+            return repo.mark_score_stable(game_id, **kwargs)
+
+    def mark_final(self, game_id: UUID) -> Game:
+        with self._repo() as repo:
+            return repo.mark_final(game_id)
+
     def list_connections(self) -> tuple[YoutubeConnection, ...]:
         with self._connections() as repo:
             return repo.list_connections()

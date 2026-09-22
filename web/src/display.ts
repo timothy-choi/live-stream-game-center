@@ -40,6 +40,12 @@ export function formatUtc(value: string | null): string | null {
 }
 
 export function trackingHint(game: GameSummary): string | null {
+  if (game.completion_status === "FINALIZING") {
+    if (game.recovery_status === "RECOVERING") {
+      return "Recovering missed scoring...";
+    }
+    return "VERIFYING FINAL SCORE";
+  }
   if (!game.tracking_enabled) {
     return "Tracking off";
   }
@@ -69,5 +75,31 @@ export function lifecycleLabel(lifecycle: string): string {
   if (lifecycle === "ENDED") {
     return "ENDED";
   }
+  if (lifecycle === "FINALIZING") {
+    return "FINALIZING";
+  }
+  if (lifecycle === "FINAL") {
+    return "FINAL";
+  }
   return lifecycle;
+}
+
+export function badgeKind(game: GameSummary): string {
+  if (game.completion_status === "FINAL") {
+    return "FINAL";
+  }
+  if (game.completion_status === "FINALIZING") {
+    return "FINALIZING";
+  }
+  return game.platform_lifecycle;
+}
+
+export function endedUnverifiedNote(game: GameSummary): string | null {
+  if (game.completion_status === "FINAL" || game.completion_status === "FINALIZING") {
+    return null;
+  }
+  if (game.platform_lifecycle === "ENDED" && game.score.status === "TRUSTED") {
+    return "Latest tracked score";
+  }
+  return null;
 }

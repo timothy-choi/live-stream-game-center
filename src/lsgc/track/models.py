@@ -10,6 +10,14 @@ from dataclasses import dataclass
 from enum import Enum
 
 
+class ScoreProvenance(str, Enum):
+    """How a confirmed pair was observed. Append-only history distinguishes these."""
+
+    GAMEPLAY_SCOREBOARD = "GAMEPLAY_SCOREBOARD"
+    RECOVERED_GAMEPLAY_SCOREBOARD = "RECOVERED_GAMEPLAY_SCOREBOARD"
+    POSTGAME_FINAL = "POSTGAME_FINAL"
+
+
 class ApplyOutcome(str, Enum):
     """What the validator did with one input. Diagnostic, not a probability."""
 
@@ -112,6 +120,7 @@ class ConfirmedScoreChange:
     confirmed_frame_index: int | None
     confirmed_epoch: int | None
     initialization: bool
+    source: ScoreProvenance = ScoreProvenance.GAMEPLAY_SCOREBOARD
 
     @property
     def previous_pair(self) -> tuple[int, int] | None:

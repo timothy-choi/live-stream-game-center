@@ -22,6 +22,8 @@ from lsgc.persist.errors import (
     UnknownGameError,
 )
 from lsgc.persist.notify import (
+    KIND_COMPLETION_CHANGED,
+    KIND_FINAL_SCORE_CONFLICT,
     KIND_MATCHUP_CONFIRMED,
     KIND_MATCHUP_CONFLICT,
     KIND_PLATFORM_LIFECYCLE_CHANGED,
@@ -31,16 +33,19 @@ from lsgc.persist.notify import (
     emit_game_change,
 )
 from lsgc.persist.models import (
+    CompletionStatus,
     Game,
+    HistoryCompleteness,
     MatchupPersistResult,
     PersistOutcome,
     PersistResult,
     PlatformLifecycle,
+    RecoveryStatus,
     ScoreChangeRecord,
     TrackingStatus,
 )
 from lsgc.identity.models import ConfirmedMatchupChange, IdentityMethod
-from lsgc.track.models import ConfirmedScoreChange
+from lsgc.track.models import ConfirmedScoreChange, ScoreProvenance
 
 _GAME_COLUMNS = """
     id, platform, external_broadcast_id, channel_id, tracking_status,
@@ -55,7 +60,15 @@ _GAME_COLUMNS = """
     matchup_confirmed_at, matchup_confirmed_timestamp_s,
     matchup_confirmed_frame_index, matchup_confirmed_epoch,
     matchup_left_method, matchup_right_method,
-    matchup_conflict_count, last_matchup_conflict
+    matchup_conflict_count, last_matchup_conflict,
+    completion_status, completion_confirmed_at,
+    completion_confirmed_timestamp_s, completion_confirmed_frame_index,
+    finalizing_started_at, finalizing_deadline_at,
+    postgame_left_score, postgame_right_score,
+    postgame_confirmed_at, postgame_confirmed_timestamp_s,
+    final_score_verified, final_score_conflict,
+    score_stable_since_at, score_stable_since_timestamp_s,
+    recovery_status, score_history_completeness
 """
 
 
@@ -74,6 +87,7 @@ def event_payload_matches(stored: ConfirmedScoreChange, incoming: ConfirmedScore
         and stored.confirmed_timestamp_s == incoming.confirmed_timestamp_s
         and stored.confirmed_frame_index == incoming.confirmed_frame_index
         and stored.confirmed_epoch == incoming.confirmed_epoch
+        and stored.source == incoming.source
     )
 
 
@@ -405,7 +419,7 @@ class PostgresGameRepository:
             SELECT revision, previous_left, previous_right, new_left, new_right,
                    initialization, evidence_count, first_seen_timestamp_s,
                    first_seen_frame_index, confirmed_timestamp_s,
-                   confirmed_frame_index, confirmed_epoch
+                   confirmed_frame_index, confirmed_epoch, source
               FROM confirmed_score_changes
              WHERE game_id = %s
              ORDER BY revision
@@ -431,7 +445,7 @@ class PostgresGameRepository:
             SELECT revision, previous_left, previous_right, new_left, new_right,
                    initialization, evidence_count, first_seen_timestamp_s,
                    first_seen_frame_index, confirmed_timestamp_s,
-                   confirmed_frame_index, confirmed_epoch, persisted_at
+                   confirmed_frame_index, confirmed_epoch, persisted_at, source
               FROM confirmed_score_changes
              WHERE game_id = %s
              ORDER BY revision
@@ -520,9 +534,9 @@ class PostgresGameRepository:
                 new_left, new_right, initialization, evidence_count,
                 first_seen_timestamp_s, first_seen_frame_index,
                 confirmed_timestamp_s, confirmed_frame_index,
-                confirmed_epoch, persisted_at
+                confirmed_epoch, persisted_at, source
             ) VALUES (
-                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
+                %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s
             )
             """,
             (
@@ -541,6 +555,7 @@ class PostgresGameRepository:
                 change.confirmed_frame_index,
                 change.confirmed_epoch,
                 datetime.now(tz=UTC),
+                change.source.value,
             ),
         )
         now = datetime.now(tz=UTC)
@@ -621,7 +636,7 @@ class PostgresGameRepository:
             SELECT revision, previous_left, previous_right, new_left, new_right,
                    initialization, evidence_count, first_seen_timestamp_s,
                    first_seen_frame_index, confirmed_timestamp_s,
-                   confirmed_frame_index, confirmed_epoch
+                   confirmed_frame_index, confirmed_epoch, source
               FROM confirmed_score_changes
              WHERE game_id = %s AND revision = %s
             """,
@@ -801,6 +816,229 @@ class PostgresGameRepository:
         emit_game_change(self._publisher, KIND_MATCHUP_CONFLICT, game)
         return game
 
+    @_serialized
+    def enter_finalizing(
+        self,
+        game_id: UUID,
+        *,
+        confirmed_timestamp_s: float | None,
+        confirmed_frame_index: int | None,
+        deadline_at: datetime,
+        started_at: datetime | None = None,
+    ) -> Game:
+        now = datetime.now(tz=UTC)
+        started = started_at or now
+        with self._conn.transaction():
+            row = self._conn.execute(
+                f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s FOR UPDATE",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                raise UnknownGameError(f"game {game_id} not found")
+            current = _game_from_row(row)
+            if current.completion_status is CompletionStatus.FINAL:
+                return current
+            if current.completion_status is CompletionStatus.FINALIZING:
+                return current
+            self._conn.execute(
+                """
+                UPDATE games SET
+                    completion_status = %s,
+                    completion_confirmed_at = %s,
+                    completion_confirmed_timestamp_s = %s,
+                    completion_confirmed_frame_index = %s,
+                    finalizing_started_at = %s,
+                    finalizing_deadline_at = %s,
+                    updated_at = %s
+                 WHERE id = %s
+                """,
+                (
+                    CompletionStatus.FINALIZING.value,
+                    now,
+                    confirmed_timestamp_s,
+                    confirmed_frame_index,
+                    started,
+                    deadline_at,
+                    now,
+                    game_id,
+                ),
+            )
+        game = self.get_game(game_id)
+        emit_game_change(self._publisher, KIND_COMPLETION_CHANGED, game)
+        return game
+
+    @_serialized
+    def record_postgame_score(
+        self,
+        game_id: UUID,
+        *,
+        left: int,
+        right: int,
+        confirmed_timestamp_s: float | None,
+        conflict: str | None = None,
+        reset_stability: bool = False,
+        stable_timestamp_s: float | None = None,
+    ) -> Game:
+        now = datetime.now(tz=UTC)
+        with self._conn.transaction():
+            row = self._conn.execute(
+                f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s FOR UPDATE",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                raise UnknownGameError(f"game {game_id} not found")
+            current = _game_from_row(row)
+            if current.completion_status is CompletionStatus.FINAL:
+                return current
+            if conflict:
+                stable_at = None
+                stable_ts = None
+            elif reset_stability or current.score_stable_since_at is None:
+                stable_at = now
+                stable_ts = stable_timestamp_s
+            else:
+                stable_at = current.score_stable_since_at
+                stable_ts = current.score_stable_since_timestamp_s
+            self._conn.execute(
+                """
+                UPDATE games SET
+                    postgame_left_score = %s,
+                    postgame_right_score = %s,
+                    postgame_confirmed_at = %s,
+                    postgame_confirmed_timestamp_s = %s,
+                    final_score_conflict = %s,
+                    score_stable_since_at = %s,
+                    score_stable_since_timestamp_s = %s,
+                    updated_at = %s
+                 WHERE id = %s
+                """,
+                (
+                    left,
+                    right,
+                    now,
+                    confirmed_timestamp_s,
+                    conflict,
+                    stable_at,
+                    stable_ts,
+                    now,
+                    game_id,
+                ),
+            )
+        game = self.get_game(game_id)
+        kind = KIND_FINAL_SCORE_CONFLICT if conflict else KIND_COMPLETION_CHANGED
+        emit_game_change(self._publisher, kind, game)
+        return game
+
+    @_serialized
+    def record_recovery_status(
+        self,
+        game_id: UUID,
+        *,
+        recovery_status: RecoveryStatus,
+        score_history_completeness: HistoryCompleteness | None = None,
+    ) -> Game:
+        now = datetime.now(tz=UTC)
+        with self._conn.transaction():
+            row = self._conn.execute(
+                f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s FOR UPDATE",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                raise UnknownGameError(f"game {game_id} not found")
+            current = _game_from_row(row)
+            if current.completion_status is CompletionStatus.FINAL:
+                return current
+            completeness = (
+                current.score_history_completeness
+                if score_history_completeness is None
+                else score_history_completeness
+            )
+            self._conn.execute(
+                """
+                UPDATE games SET
+                    recovery_status = %s,
+                    score_history_completeness = %s,
+                    updated_at = %s
+                 WHERE id = %s
+                """,
+                (
+                    recovery_status.value,
+                    completeness.value,
+                    now,
+                    game_id,
+                ),
+            )
+        game = self.get_game(game_id)
+        emit_game_change(self._publisher, KIND_COMPLETION_CHANGED, game)
+        return game
+
+    @_serialized
+    def mark_score_stable(
+        self,
+        game_id: UUID,
+        *,
+        timestamp_s: float | None,
+    ) -> Game:
+        now = datetime.now(tz=UTC)
+        with self._conn.transaction():
+            row = self._conn.execute(
+                f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s FOR UPDATE",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                raise UnknownGameError(f"game {game_id} not found")
+            current = _game_from_row(row)
+            if current.score_stable_since_at is not None:
+                return current
+            self._conn.execute(
+                """
+                UPDATE games SET
+                    score_stable_since_at = %s,
+                    score_stable_since_timestamp_s = %s,
+                    updated_at = %s
+                 WHERE id = %s
+                """,
+                (now, timestamp_s, now, game_id),
+            )
+        return self.get_game(game_id)
+
+    @_serialized
+    def mark_final(self, game_id: UUID) -> Game:
+        now = datetime.now(tz=UTC)
+        with self._conn.transaction():
+            row = self._conn.execute(
+                f"SELECT {_GAME_COLUMNS} FROM games WHERE id = %s FOR UPDATE",
+                (game_id,),
+            ).fetchone()
+            if row is None:
+                raise UnknownGameError(f"game {game_id} not found")
+            current = _game_from_row(row)
+            if current.completion_status is CompletionStatus.FINAL:
+                return current
+            if current.completion_status is not CompletionStatus.FINALIZING:
+                raise SchemaError("FINAL requires completion_status FINALIZING")
+            if current.final_score_conflict:
+                raise SchemaError("FINAL is forbidden while a final-score conflict exists")
+            if current.postgame_pair is None:
+                raise SchemaError("FINAL requires a confirmed postgame score")
+            if current.pair != current.postgame_pair:
+                raise SchemaError(
+                    "FINAL requires durable trusted score to equal confirmed postgame score"
+                )
+            self._conn.execute(
+                """
+                UPDATE games SET
+                    completion_status = %s,
+                    final_score_verified = TRUE,
+                    updated_at = %s
+                 WHERE id = %s
+                """,
+                (CompletionStatus.FINAL.value, now, game_id),
+            )
+        game = self.get_game(game_id)
+        emit_game_change(self._publisher, KIND_COMPLETION_CHANGED, game)
+        return game
+
     def _youtube(self):
         from lsgc.youtube_oauth.repository import PostgresYoutubeConnectionRepository
 
@@ -904,6 +1142,24 @@ def _game_from_row(row: dict_row | dict) -> Game:
         matchup_right_method=row.get("matchup_right_method"),
         matchup_conflict_count=int(row.get("matchup_conflict_count") or 0),
         last_matchup_conflict=row.get("last_matchup_conflict"),
+        completion_status=CompletionStatus(row.get("completion_status") or CompletionStatus.UNVERIFIED.value),
+        completion_confirmed_at=row.get("completion_confirmed_at"),
+        completion_confirmed_timestamp_s=row.get("completion_confirmed_timestamp_s"),
+        completion_confirmed_frame_index=row.get("completion_confirmed_frame_index"),
+        finalizing_started_at=row.get("finalizing_started_at"),
+        finalizing_deadline_at=row.get("finalizing_deadline_at"),
+        postgame_left_score=row.get("postgame_left_score"),
+        postgame_right_score=row.get("postgame_right_score"),
+        postgame_confirmed_at=row.get("postgame_confirmed_at"),
+        postgame_confirmed_timestamp_s=row.get("postgame_confirmed_timestamp_s"),
+        final_score_verified=bool(row.get("final_score_verified") or False),
+        final_score_conflict=row.get("final_score_conflict"),
+        score_stable_since_at=row.get("score_stable_since_at"),
+        score_stable_since_timestamp_s=row.get("score_stable_since_timestamp_s"),
+        recovery_status=RecoveryStatus(row.get("recovery_status") or RecoveryStatus.IDLE.value),
+        score_history_completeness=HistoryCompleteness(
+            row.get("score_history_completeness") or HistoryCompleteness.UNKNOWN.value
+        ),
     )
 
 
@@ -921,4 +1177,5 @@ def _change_from_row(row: dict_row | dict) -> ConfirmedScoreChange:
         confirmed_timestamp_s=row["confirmed_timestamp_s"],
         confirmed_frame_index=row["confirmed_frame_index"],
         confirmed_epoch=row["confirmed_epoch"],
+        source=ScoreProvenance(row["source"]) if row.get("source") else ScoreProvenance.GAMEPLAY_SCOREBOARD,
     )

@@ -20,7 +20,8 @@ from lsgc.broadcast.models import (
 from lsgc.broadcast.sanitize import sanitize_control_plane_text
 from lsgc.broadcast.supervisor import TrackingSupervisor
 from lsgc.broadcast.sync import ChannelSynchronizer
-from lsgc.persist.models import Game, TrackingStatus
+from lsgc.persist.finalizer import DurableFinalizationTracker
+from lsgc.persist.models import CompletionStatus, Game, TrackingStatus
 
 ClockFn = Callable[[], datetime]
 WaitFn = Callable[[threading.Event, float], bool]
@@ -155,7 +156,18 @@ class BroadcastOrchestrator:
         )
         active = self._supervisor.is_active(game.external_broadcast_id)
         if decision.eligible:
+            if (
+                game.platform_lifecycle is PlatformLifecycle.ENDED
+                and game.tracking_status is TrackingStatus.ACQUISITION_ENDED
+            ):
+                DurableFinalizationTracker.open(self._store, game.id).maybe_finalize(
+                    timestamp_s=game.score_stable_since_timestamp_s
+                )
+                return
             self._supervisor.ensure_tracking(game)
+            return
+        if active and game.completion_status is CompletionStatus.FINALIZING:
+            # YouTube ENDED must not cancel an in-flight finalization drain.
             return
         if not active:
             if (
@@ -163,6 +175,10 @@ class BroadcastOrchestrator:
                 and game.tracking_status is TrackingStatus.TRACKING
             ):
                 self._store.mark_acquisition_ended(game.id)  # type: ignore[attr-defined]
+            if game.completion_status is CompletionStatus.FINALIZING:
+                DurableFinalizationTracker.open(self._store, game.id).maybe_finalize(
+                    timestamp_s=game.score_stable_since_timestamp_s
+                )
             return
         if decision.reason is EligibilityReason.TRACKING_DISABLED:
             self._supervisor.stop_tracking(game.external_broadcast_id)
@@ -173,8 +189,14 @@ class BroadcastOrchestrator:
         if decision.reason is EligibilityReason.WRONG_CHANNEL:
             self._supervisor.stop_tracking(game.external_broadcast_id)
             return
+        if decision.reason is EligibilityReason.ALREADY_FINAL:
+            self._supervisor.stop_tracking(game.external_broadcast_id)
+            if game.platform_lifecycle is PlatformLifecycle.ENDED:
+                self._store.mark_acquisition_ended(game.id)  # type: ignore[attr-defined]
+            return
         # NOT_LIVE while a worker is active: stop acquisition. Freeze trusted
-        # score only when the platform says ENDED, not for UPCOMING.
+        # score only when the platform says ENDED, not for UPCOMING. A game
+        # already FINALIZING is kept above and never reaches this path.
         self._supervisor.stop_tracking(game.external_broadcast_id)
         if game.platform_lifecycle is PlatformLifecycle.ENDED:
             self._store.mark_acquisition_ended(game.id)  # type: ignore[attr-defined]

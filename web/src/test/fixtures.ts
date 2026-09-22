@@ -23,8 +23,15 @@ export const liveGame: GameSummary = {
     conflict_count: 0,
   },
   score: { status: "TRUSTED", left: 21, right: 14, revision: 3 },
+  completion_status: "UNVERIFIED",
+  final_score_verified: false,
+  postgame_left: null,
+  postgame_right: null,
+  final_score_conflict: null,
+  recovery_status: "IDLE",
+  score_history_completeness: "UNKNOWN",
   last_updated_at: stamp,
-  cursor: "3:1:0:LIVE:TRACKING:1",
+  cursor: "3:1:0:LIVE:TRACKING:1:UNVERIFIED:IDLE:UNKNOWN",
 };
 
 export const upcomingGame: GameSummary = {
@@ -48,8 +55,15 @@ export const upcomingGame: GameSummary = {
     conflict_count: 0,
   },
   score: { status: "UNCONFIRMED", left: null, right: null, revision: 0 },
+  completion_status: "UNVERIFIED",
+  final_score_verified: false,
+  postgame_left: null,
+  postgame_right: null,
+  final_score_conflict: null,
+  recovery_status: "IDLE",
+  score_history_completeness: "UNKNOWN",
   last_updated_at: stamp,
-  cursor: "0:0:0:UPCOMING:TRACKING:1",
+  cursor: "0:0:0:UPCOMING:TRACKING:1:UNVERIFIED:IDLE:UNKNOWN",
 };
 
 export const endedGame: GameSummary = {
@@ -73,8 +87,15 @@ export const endedGame: GameSummary = {
     conflict_count: 0,
   },
   score: { status: "TRUSTED", left: 28, right: 17, revision: 4 },
+  completion_status: "UNVERIFIED",
+  final_score_verified: false,
+  postgame_left: null,
+  postgame_right: null,
+  final_score_conflict: null,
+  recovery_status: "IDLE",
+  score_history_completeness: "UNKNOWN",
   last_updated_at: stamp,
-  cursor: "4:1:0:ENDED:ACQUISITION_ENDED:1",
+  cursor: "4:1:0:ENDED:ACQUISITION_ENDED:1:UNVERIFIED:IDLE:UNKNOWN",
 };
 
 export const conflictGame: GameSummary = {

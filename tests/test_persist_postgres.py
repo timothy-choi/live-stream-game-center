@@ -93,10 +93,12 @@ class TestMigrations:
                 assert 2 in first
                 assert 3 in first
                 assert 4 in first
+                assert 5 in first
+                assert 6 in first
                 again = apply_migrations(conn)
                 conn.commit()
                 assert again == []
-                assert applied_versions(conn) == [1, 2, 3, 4]
+                assert applied_versions(conn) == [1, 2, 3, 4, 5, 6]
                 tables = conn.execute(
                     """
                     SELECT tablename FROM pg_tables
@@ -226,6 +228,42 @@ class TestTransactionalConfirmation:
         with pytest.raises(ConflictingConfirmationError, match="different data"):
             repo.persist_confirmation(tracker.game_id, conflict)
         assert tracker.game.pair == (21, 7)
+
+    def test_recovered_source_and_completeness_columns(self, repo: PostgresGameRepository) -> None:
+        from lsgc.persist.models import HistoryCompleteness, RecoveryStatus
+        from lsgc.track.models import ScoreProvenance
+
+        game = repo.create_or_get_game(
+            platform=PLATFORM_YOUTUBE, external_broadcast_id="recovered1"
+        )
+        repo.persist_confirmation(game.id, _init_change(35, 35))
+        recovered = ConfirmedScoreChange(
+            revision=2,
+            previous_left=35,
+            previous_right=35,
+            new_left=35,
+            new_right=49,
+            evidence_count=2,
+            first_seen_timestamp_s=10.0,
+            first_seen_frame_index=4,
+            confirmed_timestamp_s=10.5,
+            confirmed_frame_index=5,
+            confirmed_epoch=1,
+            initialization=False,
+            source=ScoreProvenance.RECOVERED_GAMEPLAY_SCOREBOARD,
+        )
+        repo.persist_confirmation(game.id, recovered)
+        history = repo.list_confirmed_changes(game.id)
+        assert history[-1].source is ScoreProvenance.RECOVERED_GAMEPLAY_SCOREBOARD
+        assert history[-1].confirmed_timestamp_s == 10.5
+        repo.record_recovery_status(
+            game.id,
+            recovery_status=RecoveryStatus.COMPLETE,
+            score_history_completeness=HistoryCompleteness.COMPLETE,
+        )
+        game = repo.get_game(game.id)
+        assert game.recovery_status is RecoveryStatus.COMPLETE
+        assert game.score_history_completeness is HistoryCompleteness.COMPLETE
 
     def test_concurrent_first_confirmation(self, migrated_dsn: str) -> None:
         with connect(migrated_dsn) as setup:

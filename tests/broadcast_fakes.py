@@ -23,6 +23,8 @@ class DummyCalibration:
         self.profile = SimpleNamespace(channel_id=channel_id)
         self.reference = None
         self.glyphs = None
+        self.finalization = None
+        self.final_reference = None
 
 
 class FakeClock:

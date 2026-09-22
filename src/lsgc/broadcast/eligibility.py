@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from lsgc.broadcast.calibration import CalibrationLookup
 from lsgc.broadcast.models import EligibilityDecision, EligibilityReason, PlatformLifecycle
-from lsgc.persist.models import Game
+from lsgc.persist.models import CompletionStatus, Game
 
 
 def evaluate_eligibility(
@@ -19,11 +19,11 @@ def evaluate_eligibility(
             reason=EligibilityReason.WRONG_CHANNEL,
             detail="broadcast does not belong to the configured channel",
         )
-    if game.platform_lifecycle is not PlatformLifecycle.LIVE:
+    if game.completion_status is CompletionStatus.FINAL:
         return EligibilityDecision(
             eligible=False,
-            reason=EligibilityReason.NOT_LIVE,
-            detail=f"platform lifecycle is {game.platform_lifecycle.value}",
+            reason=EligibilityReason.ALREADY_FINAL,
+            detail="verified final score already recorded",
         )
     if not game.tracking_enabled:
         return EligibilityDecision(
@@ -43,5 +43,17 @@ def evaluate_eligibility(
             eligible=False,
             reason=EligibilityReason.MISSING_CALIBRATION,
             detail="NOT_READY: calibration channel_id does not match broadcast",
+        )
+    if game.platform_lifecycle is not PlatformLifecycle.LIVE:
+        if game.completion_status is CompletionStatus.FINALIZING:
+            return EligibilityDecision(
+                eligible=True,
+                reason=EligibilityReason.ELIGIBLE,
+                detail="finalizing drain continues after platform ENDED",
+            )
+        return EligibilityDecision(
+            eligible=False,
+            reason=EligibilityReason.NOT_LIVE,
+            detail=f"platform lifecycle is {game.platform_lifecycle.value}",
         )
     return EligibilityDecision(eligible=True, reason=EligibilityReason.ELIGIBLE)

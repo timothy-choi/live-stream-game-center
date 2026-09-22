@@ -1,5 +1,5 @@
 import type { GameSummary } from "../api/types";
-import { scoreLabel, teamName, trackingHint } from "../display";
+import { scoreLabel, teamName, trackingHint, badgeKind, endedUnverifiedNote } from "../display";
 import { StatusBadge } from "./StatusBadge";
 
 interface Props {
@@ -16,13 +16,13 @@ export function Scoreboard({ game }: Props) {
   return (
     <header className="scoreboard" aria-live="polite">
       <div className="scoreboard-status">
-        <StatusBadge lifecycle={game.platform_lifecycle} />
+        <StatusBadge lifecycle={badgeKind(game)} />
         {game.matchup.status === "CONFLICT" ? (
           <span className="review-flag">Identity needs review</span>
         ) : null}
         {tracking ? <span className="tracking-hint">{tracking}</span> : null}
-        {game.platform_lifecycle === "ENDED" && game.score.status === "TRUSTED" ? (
-          <span className="tracking-hint">Latest tracked score</span>
+        {endedUnverifiedNote(game) ? (
+          <span className="tracking-hint">{endedUnverifiedNote(game)}</span>
         ) : null}
       </div>
       <div className="scoreboard-grid">

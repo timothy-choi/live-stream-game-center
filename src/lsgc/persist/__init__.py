@@ -19,6 +19,7 @@ from lsgc.persist.errors import (
 from lsgc.persist.migrate import apply_migrations, connect
 from lsgc.persist.models import (
     PLATFORM_YOUTUBE,
+    CompletionStatus,
     Game,
     MatchupPersistResult,
     PersistOutcome,
@@ -33,15 +34,18 @@ from lsgc.persist.repository import (
     event_payload_matches,
     matchup_payload_matches,
 )
+from lsgc.persist.finalizer import DurableFinalizationTracker
 from lsgc.persist.tracker import DurableMatchupTracker, DurableScoreTracker
 
 __all__ = [
     "DATABASE_URL_ENV",
     "PLATFORM_YOUTUBE",
     "TEST_DATABASE_URL_ENV",
+    "CompletionStatus",
     "ConfigError",
     "ConflictingConfirmationError",
     "ConflictingMatchupError",
+    "DurableFinalizationTracker",
     "DurableMatchupTracker",
     "DurableScoreTracker",
     "Game",
