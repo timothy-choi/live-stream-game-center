@@ -8,10 +8,11 @@ zero viewers watching**. Any YouTube player embedded in the eventual frontend is
 presentation only and is never a source of video data. The backend must obtain
 frames independently.
 
-**Current milestone: 12 complete (PASS) — ESPN-style web app foundation.**
-The browser is a consumer of the M11 API. **The browser does not perform
-score recognition. The browser does not start tracking. Closing the browser
-does not stop tracking.** See
+**Current milestone: 12 complete (PASS).** M12.5A YouTube OAuth channel
+connection is implemented and waiting for a real Google consent (not PASS
+until that happens). The browser is a consumer of the M11 API. **The
+browser does not perform score recognition. The browser does not start
+tracking. Closing the browser does not stop tracking.** See
 [`docs/implementation-status.md`](docs/implementation-status.md).
 
 ## Requirements
@@ -20,8 +21,10 @@ does not stop tracking.** See
 - FFmpeg and ffprobe on `PATH` (verified on 8.1.2)
 - PostgreSQL 16 for persistence (optional for offline tests; required to
   recover confirmed scores and confirmed matchups after a restart)
-- YouTube Data API v3 credentials for M9 broadcast discovery (API key and/or
-  OAuth access token). Never committed; see `.env.example`.
+- Application Google OAuth client (client ID + secret) for the product
+  Connect YouTube path. Ordinary users never supply an API key or channel
+  ID. A static developer API key/channel ID remains an optional fallback.
+  Never committed; see `.env.example`.
 - FastAPI for the M11 read-only API. Orchestrator stays off unless
   `LSGC_RUN_ORCHESTRATOR=true`.
 - Node.js 20+ for the M12 web app (`web/`).
@@ -32,6 +35,43 @@ does not stop tracking.** See
 python3 -m venv .venv
 ./.venv/bin/pip install -e ".[dev]"
 ```
+
+### Local YouTube OAuth (M12.5A)
+
+This is **application** configuration. Users later grant access in the browser.
+Do not paste client secrets into chat or commit them.
+
+1. Create or select a Google Cloud project:
+   https://console.cloud.google.com/
+2. Enable **YouTube Data API v3**:
+   https://console.cloud.google.com/apis/library/youtube.googleapis.com
+3. Configure the OAuth consent screen (External is fine for local testing;
+   add your Google account as a test user while the app is in Testing).
+4. Create an OAuth client of type **Web application**:
+   https://developers.google.com/identity/protocols/oauth2/web-server
+5. Authorized redirect URI (must match exactly, including `127.0.0.1` vs `localhost`):
+
+   `http://127.0.0.1:8000/api/youtube/oauth/callback`
+
+6. Put the client ID and secret in a gitignored repo-root `.env`:
+
+   ```bash
+   LSGC_GOOGLE_CLIENT_ID=....apps.googleusercontent.com
+   LSGC_GOOGLE_CLIENT_SECRET=...
+   LSGC_GOOGLE_REDIRECT_URI=http://127.0.0.1:8000/api/youtube/oauth/callback
+   LSGC_TOKEN_ENCRYPTION_KEY=   # output of: python -c "from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())"
+   LSGC_WEB_ORIGIN=http://127.0.0.1:5173
+   LSGC_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+   ```
+
+7. Start the API and web app, then click **Connect YouTube**. The backend
+   owns scopes, state, and the redirect. Tokens never go to React.
+
+Requested scope: `https://www.googleapis.com/auth/youtube.readonly`
+(sufficient for `channels.list mine=true` and `liveBroadcasts.list`).
+
+Google's official web-server guide does not require PKCE for this
+confidential-client flow; this project does not implement a custom PKCE.
 
 ## Run the ingestion probe
 
@@ -257,10 +297,23 @@ is a new game.
 
 ## Broadcast discovery and tracking orchestration
 
-M9 is the **control plane**. It uses the YouTube Data API v3 to discover
-broadcasts for explicitly configured channels. It does **not** scrape HTML and
+M9 is the **control plane**. The product path is: a user clicks
+**Connect YouTube**, Google OAuth authorizes the backend, the backend
+reads the authorized channel via `channels.list mine=true`, and M9
+discovers that channel's broadcasts with authenticated
+`liveBroadcasts.list mine=true`. It does **not** scrape HTML and
 does **not** use yt-dlp playlists as a schedule database. yt-dlp remains the
 **data plane** inside M4 (`LiveFrameSession`) for playable media.
+
+These are three different things:
+
+| Layer | Who configures it | Examples |
+| --- | --- | --- |
+| Application Google client | Operator / developer | `LSGC_GOOGLE_CLIENT_ID`, `LSGC_GOOGLE_CLIENT_SECRET`, redirect URI |
+| User YouTube authorization | The channel owner, via Google consent | Stored refresh credential, exact channel ID |
+| Channel calibration | Per-channel visual profile | `{calibration_dir}/{channel_id}/profile.json` |
+
+Ordinary users do **not** paste an API key, channel ID, client ID, or client secret.
 
 Identity is the exact YouTube video/broadcast ID. A scheduled broadcast that
 goes live is the same durable game because the ID is unchanged. Titles and
@@ -283,11 +336,19 @@ Configuration (placeholders in `.env.example`; never commit real values):
 
 | variable | purpose |
 | --- | --- |
-| `LSGC_YOUTUBE_CHANNEL_ID` or `LSGC_YOUTUBE_CHANNEL_IDS` | explicit connected channel(s); no hardcoded `UC…` in source |
-| `LSGC_YOUTUBE_API_KEY` | Data API key (`search.list` + `videos.list`) |
-| `LSGC_YOUTUBE_ACCESS_TOKEN` | optional OAuth; prefers `liveBroadcasts.list mine=true` |
+| `LSGC_GOOGLE_CLIENT_ID` / `LSGC_GOOGLE_CLIENT_SECRET` | **application** OAuth web client (not a user secret) |
+| `LSGC_GOOGLE_REDIRECT_URI` | must match the Google Cloud authorized redirect exactly; default `http://127.0.0.1:8000/api/youtube/oauth/callback` |
+| `LSGC_TOKEN_ENCRYPTION_KEY` | Fernet key for refresh/access token ciphertext at rest |
+| `LSGC_WEB_ORIGIN` | frontend origin used after OAuth callback (default `http://127.0.0.1:5173`) |
+| `LSGC_YOUTUBE_CHANNEL_ID` or `LSGC_YOUTUBE_CHANNEL_IDS` | **developer fallback** only; unused when that channel is already OAuth-connected |
+| `LSGC_YOUTUBE_API_KEY` | **developer fallback** `search.list` + `videos.list` |
+| `LSGC_YOUTUBE_ACCESS_TOKEN` | **developer fallback** short-lived token; product path uses stored refresh |
 | `LSGC_CALIBRATION_DIR` | `{dir}/{channel_id}/profile.json` + `reference.json` + `glyphs.json` + optional `logos.json` |
-| `LSGC_BROADCAST_SYNC_INTERVAL_S` | poll interval; default 1800s with an API key, 120s with OAuth |
+| `LSGC_BROADCAST_SYNC_INTERVAL_S` | poll interval; default 1800s with an API key, 120s with OAuth app config |
+
+OAuth-connected channels take precedence. The same exact channel is never
+synchronized twice. Zero connections is valid: the API and orchestrator
+start, and the frontend says no YouTube channel is connected.
 
 Tracking starts only when: the broadcast belongs to the configured channel,
 platform state is `LIVE`, `tracking_enabled` is true, that channel’s
@@ -412,6 +473,7 @@ only. CORS is opt-in via `LSGC_CORS_ORIGINS` (never unrestricted by default).
 | GET | `/api/games/{id}` | Snapshot: identity, lifecycle, matchup, trusted score |
 | GET | `/api/games/{id}/score-events` | Append-only confirmed score timeline |
 | GET | `/api/games/{id}/events` | SSE product events |
+| GET | `/api/diagnostics/orchestrator` | Read-only M9 loop status (local operator). Does not start tracking |
 
 There is no separate `/feed`. Home-page “live + next N upcoming” uses
 `GET /api/games` with `lifecycle=LIVE,UPCOMING` and `limit`. Default order is
@@ -527,6 +589,91 @@ tracking.
 Reconnect: fetch durable snapshot, subscribe, apply `GAME_SNAPSHOT` after
 registration, ignore stale revisions, refetch on `RESYNC_REQUIRED`.
 
+## Live product path
+
+This is the only path that proves a real scheduled YouTube broadcast can
+appear on the M12 home page without the browser owning tracking:
+
+```
+Real scheduled YouTube stream
+        ↓
+YouTube Data API discovers it          (M9 control plane)
+        ↓
+stream actually goes LIVE
+        ↓
+M9 automatically starts worker         (no viewer required)
+        ↓
+M4 gets real video frames
+        ↓
+M3 finds scoreboard
+        ↓
+M6 reads score + M10 reads teams
+        ↓
+M7 validates changes
+        ↓
+M8 persists them                       (PostgreSQL is authoritative)
+        ↓
+M11 pushes SSE
+        ↓
+M12 home page visibly updates          (browser is a consumer)
+```
+
+**The browser does not perform score recognition. The browser does not start
+tracking. Closing the browser does not stop tracking.**
+
+M9–M12 were proven separately (offline orchestration, demo-API UI). This
+combined live path still needs a real channel credential and a real
+scheduled/live Arcade broadcast. It is **not** implied by M12 PASS.
+
+### Operator run (same machine)
+
+1. PostgreSQL: `docker compose -f docker-compose.postgres.yml up -d`
+2. Put **application** Google OAuth client values in a gitignored `.env`
+   (see `.env.example`). Ordinary users then click **Connect YouTube**
+   in the web app. Static `LSGC_YOUTUBE_CHANNEL_ID` + API key is a
+   developer fallback only.
+3. Install the Arcade fixture calibration for **that same channel only**:
+
+   ```bash
+   set -a && source .env && set +a
+   ./.venv/bin/python tools/prepare_live_calibration.py
+   ```
+
+   Another capture setup needs its own authored profile. This script refuses
+   to bind the fixture to a different channel id.
+4. Start API **and** orchestrator in one process so SSE shares the in-process
+   hub (a separate `python -m lsgc.broadcast run` will persist, but this
+   process will not see those writes as live SSE):
+
+   ```bash
+   set -a && source .env && set +a
+   export LSGC_RUN_ORCHESTRATOR=true
+   export LSGC_CORS_ORIGINS=http://localhost:5173,http://127.0.0.1:5173
+   export LSGC_CALIBRATION_DIR="${LSGC_CALIBRATION_DIR:-artifacts/calibration}"
+   # API-key default sync is 1800s (quota). Lower only for a short validation.
+   export LSGC_BROADCAST_SYNC_INTERVAL_S=30
+   ./.venv/bin/python -m lsgc.api
+   ```
+
+5. Frontend: `cd web && cp .env.example .env.local && npm run dev`
+6. Schedule or start a Madden 27 Arcade broadcast on the configured channel.
+7. Observe:
+
+   ```bash
+   set -a && source .env && set +a
+   export LSGC_API_BASE_URL=http://127.0.0.1:8000
+   ./.venv/bin/python tools/live_e2e.py --check --discover --watch
+   ```
+
+   And open `http://localhost:5173` — the home card must update without
+   reload. Opening or closing that tab must not start or stop the worker.
+
+`tools/live_e2e.py` and `tools/m12_5_status.py` are **read-only observers**.
+They never call `ensure_tracking`, `LiveFrameSession`, or the vision pipeline.
+`GET /api/diagnostics/orchestrator` exposes the in-process reconcile snapshot
+(discovered/live/upcoming counts, worker frames) without credentials or media
+URLs.
+
 ## Tests
 
 ```bash
@@ -593,6 +740,7 @@ web/            React + TypeScript + Vite scoreboard. M11 consumer only.
 migrations/     versioned SQL
 docker-compose.postgres.yml
 tools/          developer scripts for M3–M12 labelled-set capture and scoring;
+                live product-path observer (`live_e2e.py`);
                 network/DB as noted, never run by default pytest
 tests/
   fixtures/     calibration profile, M3 reference, M6 digit glyphs, M10 logo

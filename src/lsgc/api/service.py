@@ -4,8 +4,18 @@ from __future__ import annotations
 
 from uuid import UUID
 
-from lsgc.api.mapping import game_summary, timeline_event
-from lsgc.api.schemas import GameListResponse, GameSummary, ScoreTimelineResponse
+from lsgc.api.mapping import game_summary, timeline_event, utc_iso
+from lsgc.api.schemas import (
+    GameListResponse,
+    GameSummary,
+    OrchestratorDiagnostic,
+    ScoreTimelineResponse,
+    WorkerDiagnostic,
+    YoutubeConnectionListResponse,
+    YoutubeConnectionSummary,
+)
+from lsgc.youtube_oauth.models import YoutubeConnection
+from lsgc.broadcast.sanitize import sanitize_control_plane_text
 from lsgc.identity.catalog import TeamCatalog
 from lsgc.persist.errors import PersistError
 from lsgc.persist.models import PlatformLifecycle
@@ -72,6 +82,69 @@ def list_score_events(
         limit=limit,
         offset=offset,
     )
+
+
+def orchestrator_diagnostic(orchestrator) -> OrchestratorDiagnostic:
+    """Read-only snapshot of the in-process M9 loop. Never starts a worker."""
+    status = getattr(orchestrator, "status", None)
+    if orchestrator is None or status is None:
+        return OrchestratorDiagnostic(orchestrator_enabled=False)
+    workers = []
+    for item in getattr(status, "workers", ()) or ():
+        workers.append(
+            WorkerDiagnostic(
+                broadcast_id=item.broadcast_id,
+                state=item.state.value if hasattr(item.state, "value") else str(item.state),
+                frames_emitted=int(getattr(item, "frames_emitted", 0) or 0),
+                retry_count=int(getattr(item, "retry_count", 0) or 0),
+                last_error=sanitize_control_plane_text(getattr(item, "last_error", None)),
+                started_at=utc_iso(getattr(item, "started_at", None)),
+                finished_at=utc_iso(getattr(item, "finished_at", None)),
+                next_retry_at=utc_iso(getattr(item, "next_retry_at", None)),
+            )
+        )
+    return OrchestratorDiagnostic(
+        orchestrator_enabled=True,
+        last_sync_at=utc_iso(status.last_sync_at),
+        last_reconcile_at=utc_iso(status.last_reconcile_at),
+        last_sync_ok=status.last_sync_ok,
+        last_sync_error=sanitize_control_plane_text(status.last_sync_error),
+        discovered_count=int(status.discovered_count),
+        live_count=int(status.live_count),
+        upcoming_count=int(status.upcoming_count),
+        ended_count=int(status.ended_count),
+        active_worker_count=int(status.active_worker_count),
+        workers=workers,
+    )
+
+
+def connection_summary(connection: YoutubeConnection, calibration_status: str) -> YoutubeConnectionSummary:
+    return YoutubeConnectionSummary(
+        id=connection.id,
+        provider=connection.provider,
+        youtube_channel_id=connection.youtube_channel_id,
+        youtube_channel_title=connection.youtube_channel_title,
+        status=connection.status.value,
+        calibration_status=calibration_status,
+        connected_at=require_utc_iso_safe(connection.connected_at),
+        last_refreshed_at=utc_iso(connection.last_refreshed_at),
+    )
+
+
+def require_utc_iso_safe(value) -> str:
+    stamp = utc_iso(value)
+    if stamp is None:
+        raise PersistError("timestamp is required")
+    return stamp
+
+
+def list_youtube_connections(service) -> YoutubeConnectionListResponse:
+    items = []
+    for connection in service.list_connections():
+        items.append(
+            connection_summary(connection, service.calibration_for(connection).value)
+        )
+    return YoutubeConnectionListResponse(connections=items)
 
 
 def database_status(store) -> str:

@@ -6,6 +6,8 @@ backend-owned. Tests inject a store and never need YouTube credentials.
 
 from __future__ import annotations
 
+import logging
+import re
 import threading
 from contextlib import asynccontextmanager
 from typing import Any
@@ -21,6 +23,36 @@ from lsgc.persist.config import database_url as load_database_url
 from lsgc.persist.migrate import apply_migrations, connect
 from lsgc.persist.pool import PooledGameRepository, open_pool
 
+_UNSET = object()
+_OAUTH_QUERY_RE = re.compile(
+    r"(?i)\b(code|state|scope|iss)=([^&\s]+)"
+)
+
+
+class _RedactOAuthAccessLogFilter(logging.Filter):
+    """Keep uvicorn access logs from recording OAuth codes or state."""
+
+    def filter(self, record: logging.LogRecord) -> bool:
+        try:
+            message = record.getMessage()
+        except Exception:
+            return True
+        if "oauth" not in message.lower() and "code=" not in message:
+            return True
+        record.msg = _OAUTH_QUERY_RE.sub(r"\1=[redacted]", message)
+        record.args = ()
+        return True
+
+
+def _install_oauth_access_log_redaction() -> None:
+    logger = logging.getLogger("uvicorn.access")
+    if any(isinstance(item, _RedactOAuthAccessLogFilter) for item in logger.filters):
+        return
+    logger.addFilter(_RedactOAuthAccessLogFilter())
+
+
+_install_oauth_access_log_redaction()
+
 
 def create_app(
     *,
@@ -29,6 +61,8 @@ def create_app(
     settings: ApiSettings | None = None,
     catalog: TeamCatalog | None = None,
     orchestrator: Any | None = None,
+    connection_service: Any = _UNSET,
+    calibration: Any | None = None,
 ) -> FastAPI:
     """Build the API. Inject `store` in tests. Production uses a connection pool."""
     resolved_settings = settings or load_api_settings()
@@ -46,6 +80,21 @@ def create_app(
         owned_pool = open_pool(dsn)
         owned_store = PooledGameRepository(owned_pool, publisher=resolved_hub)
 
+    if calibration is None:
+        from lsgc.broadcast.calibration import FilesystemCalibrationLookup
+        from lsgc.broadcast.config import load_runtime_config
+
+        try:
+            calibration = FilesystemCalibrationLookup(load_runtime_config().calibration_dir)
+        except Exception:
+            from lsgc.broadcast.calibration import MappingCalibrationLookup
+
+            calibration = MappingCalibrationLookup()
+    if connection_service is _UNSET:
+        from lsgc.youtube_oauth.service import maybe_connection_service
+
+        connection_service = maybe_connection_service(owned_store, calibration)
+
     stop = threading.Event()
     orchestrator_thread: threading.Thread | None = None
     started_orchestrator = orchestrator
@@ -54,7 +103,11 @@ def create_app(
     async def lifespan(app: FastAPI):
         nonlocal started_orchestrator, orchestrator_thread
         if resolved_settings.run_orchestrator and started_orchestrator is None:
-            started_orchestrator = _start_orchestrator(owned_store)
+            started_orchestrator = _start_orchestrator(
+                owned_store,
+                connection_service=connection_service,
+                calibration=calibration,
+            )
         if started_orchestrator is not None and hasattr(started_orchestrator, "run_forever"):
             orchestrator_thread = threading.Thread(
                 target=started_orchestrator.run_forever,
@@ -88,12 +141,14 @@ def create_app(
     app.state.hub = resolved_hub
     app.state.store = owned_store
     app.state.orchestrator = started_orchestrator
+    app.state.connection_service = connection_service
+    app.state.calibration = calibration
     if resolved_settings.cors_enabled:
         app.add_middleware(
             CORSMiddleware,
             allow_origins=list(resolved_settings.cors_origins),
             allow_credentials=False,
-            allow_methods=["GET", "HEAD", "OPTIONS"],
+            allow_methods=["GET", "HEAD", "OPTIONS", "POST"],
             allow_headers=["*"],
         )
     register_exception_handlers(app)
@@ -101,18 +156,25 @@ def create_app(
     return app
 
 
-def _start_orchestrator(store: Any):
-    from lsgc.broadcast.calibration import FilesystemCalibrationLookup
+def _start_orchestrator(store: Any, *, connection_service, calibration):
     from lsgc.broadcast.config import load_runtime_config
     from lsgc.broadcast.orchestrator import orchestrator_from_config
-    from lsgc.broadcast.youtube import YouTubeDataApiClient
+    from lsgc.youtube_oauth.catalog import HybridBroadcastCatalog, merge_sync_channels
 
     config = load_runtime_config()
-    catalog = YouTubeDataApiClient(
-        api_key=config.api_key, access_token=config.access_token
+    catalog = HybridBroadcastCatalog(
+        store=store,
+        service=connection_service,
+        developer_api_key=config.api_key,
+        developer_access_token=config.access_token,
     )
-    lookup = FilesystemCalibrationLookup(config.calibration_dir)
-    return orchestrator_from_config(config, store=store, catalog=catalog, calibration=lookup)
+    return orchestrator_from_config(
+        config,
+        store=store,
+        catalog=catalog,
+        calibration=calibration,
+        channel_provider=lambda: merge_sync_channels(store, config.channels),
+    )
 
 
 def app_from_env() -> FastAPI:

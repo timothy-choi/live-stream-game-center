@@ -7,6 +7,7 @@ from uuid import uuid4
 
 from lsgc.api.hub import GameEventHub
 from lsgc.api.schemas import GameSummary, ScoreStatus
+from lsgc.broadcast.models import OrchestratorStatus, WorkerSnapshot, WorkerState
 from lsgc.identity.catalog import DEFAULT_CATALOG
 from lsgc.persist.models import PlatformLifecycle, TrackingStatus
 from api_support import (
@@ -220,7 +221,58 @@ class TestGameDetail:
             client.get(f"/api/games/{game.id}")
             client.get("/api/games")
             client.get(f"/api/games/{game.id}/score-events")
+            client.get("/api/diagnostics/orchestrator")
         assert orch.ensure_calls == []
+
+
+class TestOrchestratorDiagnostic:
+    def test_absent_orchestrator_status(self) -> None:
+        client, _, _, _ = _app()
+        with client:
+            body = client.get("/api/diagnostics/orchestrator").json()
+        assert body["orchestrator_enabled"] is False
+        assert body["workers"] == []
+
+    def test_reports_reconcile_status_without_starting_tracking(self) -> None:
+        class StatusOrch(FakeOrchestrator):
+            status = OrchestratorStatus(
+                last_sync_at=datetime(2026, 9, 21, 22, 0, tzinfo=UTC),
+                last_reconcile_at=datetime(2026, 9, 21, 22, 0, 5, tzinfo=UTC),
+                last_sync_ok=True,
+                last_sync_error=None,
+                discovered_count=1,
+                live_count=0,
+                upcoming_count=1,
+                ended_count=0,
+                active_worker_count=0,
+                workers=(
+                    WorkerSnapshot(
+                        broadcast_id="diagBroadcast01",
+                        state=WorkerState.STOPPED,
+                        started_at=None,
+                        finished_at=None,
+                        last_error=None,
+                        retry_count=0,
+                        next_retry_at=None,
+                        frames_emitted=0,
+                    ),
+                ),
+            )
+
+        orch = StatusOrch()
+        client, _, _, _ = _app(orchestrator=orch)
+        with client:
+            body = client.get("/api/diagnostics/orchestrator").json()
+        assert body["orchestrator_enabled"] is True
+        assert body["last_sync_ok"] is True
+        assert body["upcoming_count"] == 1
+        assert body["last_sync_at"] == "2026-09-21T22:00:00Z"
+        assert body["workers"][0]["broadcast_id"] == "diagBroadcast01"
+        assert orch.ensure_calls == []
+        raw = str(body).lower()
+        assert "api_key" not in raw
+        assert "access_token" not in raw
+        assert "postgresql://" not in raw
 
 
 class TestScoreTimeline:
@@ -259,6 +311,9 @@ class TestOpenAPIAndReadonly:
         assert "/api/games" in paths
         assert "get" in paths["/api/games"]
         assert "post" not in paths["/api/games"]
+        assert "/api/diagnostics/orchestrator" in paths
+        assert "get" in paths["/api/diagnostics/orchestrator"]
+        assert "post" not in paths["/api/diagnostics/orchestrator"]
 
     def test_schema_round_trip(self) -> None:
         GameSummary.model_validate(

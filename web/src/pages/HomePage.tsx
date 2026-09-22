@@ -1,4 +1,5 @@
 import { GameCard } from "../components/GameCard";
+import { YouTubeConnectionPanel } from "../components/YouTubeConnectionPanel";
 import { useGameFeed } from "../hooks/useGameFeed";
 import type { GameSummary } from "../api/types";
 
@@ -40,10 +41,11 @@ export function HomePage() {
       </div>
       {loading ? <p className="muted">Loading games…</p> : null}
       {error ? <p className="banner banner-warn">{error}</p> : null}
+      <YouTubeConnectionPanel />
       {!loading && !error && games.length === 0 ? (
         <p className="empty">
-          No synchronized games yet. The backend keeps watching configured channels even when this
-          page is empty.
+          No synchronized games yet. After a YouTube channel is connected and calibrated, the
+          backend discovers broadcasts even when this page is empty.
         </p>
       ) : null}
       <Section title="Live now" games={live} />

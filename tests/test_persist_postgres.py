@@ -53,7 +53,10 @@ def migrated_dsn(postgres_dsn: str) -> str:
 def repo(migrated_dsn: str) -> PostgresGameRepository:
     conn = connect(migrated_dsn)
     with conn.transaction():
-        conn.execute("TRUNCATE confirmed_score_changes, games CASCADE")
+        conn.execute(
+            "TRUNCATE youtube_oauth_states, youtube_connections, "
+            "confirmed_score_changes, games CASCADE"
+        )
     yield PostgresGameRepository(conn)
     conn.close()
 
@@ -80,7 +83,8 @@ class TestMigrations:
         with connect(postgres_dsn) as conn:
             try:
                 conn.execute(
-                    "DROP TABLE IF EXISTS confirmed_matchup_changes, confirmed_score_changes, games, schema_migrations CASCADE"
+                    "DROP TABLE IF EXISTS youtube_oauth_states, youtube_connections, "
+                    "confirmed_matchup_changes, confirmed_score_changes, games, schema_migrations CASCADE"
                 )
                 conn.commit()
                 first = apply_migrations(conn)
@@ -88,10 +92,11 @@ class TestMigrations:
                 assert 1 in first
                 assert 2 in first
                 assert 3 in first
+                assert 4 in first
                 again = apply_migrations(conn)
                 conn.commit()
                 assert again == []
-                assert applied_versions(conn) == [1, 2, 3]
+                assert applied_versions(conn) == [1, 2, 3, 4]
                 tables = conn.execute(
                     """
                     SELECT tablename FROM pg_tables
@@ -103,6 +108,8 @@ class TestMigrations:
                 assert "games" in names
                 assert "confirmed_score_changes" in names
                 assert "confirmed_matchup_changes" in names
+                assert "youtube_connections" in names
+                assert "youtube_oauth_states" in names
                 assert "schema_migrations" in names
             finally:
                 apply_migrations(conn)
@@ -305,3 +312,45 @@ class TestRestartPostgres:
         assert restarted.apply(obs(0, 0, index=0, ts=0.0)).outcome is ApplyOutcome.FROZEN
         assert "final" not in restarted.game.tracking_status.value.lower()
         assert restarted.game.tracking_status is not TrackingStatus("TRACKING")
+
+
+class TestYoutubeConnections:
+    def test_upsert_same_channel_is_idempotent(self, repo: PostgresGameRepository) -> None:
+        from datetime import UTC, datetime
+
+        from lsgc.youtube_oauth.models import ConnectionStatus
+
+        first = repo.upsert_connected_channel(
+            youtube_channel_id="UCz3q0f-dMPNIyQhntPTE7gQ",
+            youtube_channel_title="Arcade",
+            granted_scopes="https://www.googleapis.com/auth/youtube.readonly",
+            refresh_token_ciphertext="cipher-refresh-1",
+            access_token_ciphertext="cipher-access-1",
+            access_token_expires_at=datetime(2026, 9, 21, 21, 0, tzinfo=UTC),
+            token_type="Bearer",
+        )
+        second = repo.upsert_connected_channel(
+            youtube_channel_id="UCz3q0f-dMPNIyQhntPTE7gQ",
+            youtube_channel_title="Arcade Live",
+            granted_scopes="https://www.googleapis.com/auth/youtube.readonly",
+            refresh_token_ciphertext="cipher-refresh-2",
+            access_token_ciphertext="cipher-access-2",
+            access_token_expires_at=datetime(2026, 9, 21, 22, 0, tzinfo=UTC),
+            token_type="Bearer",
+        )
+        assert first.id == second.id
+        assert len(repo.list_connections()) == 1
+        assert second.youtube_channel_title == "Arcade Live"
+        assert second.status is ConnectionStatus.CONNECTED
+        assert second.refresh_token_ciphertext == "cipher-refresh-2"
+
+    def test_oauth_state_is_single_use(self, repo: PostgresGameRepository) -> None:
+        from datetime import UTC, datetime, timedelta
+
+        from lsgc.persist.errors import PersistError
+
+        now = datetime(2026, 9, 21, 20, 0, tzinfo=UTC)
+        repo.create_oauth_state("state-1", expires_at=now + timedelta(minutes=10))
+        repo.consume_oauth_state("state-1", now=now)
+        with pytest.raises(PersistError, match="already used"):
+            repo.consume_oauth_state("state-1", now=now)

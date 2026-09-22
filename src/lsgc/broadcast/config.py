@@ -59,11 +59,6 @@ def load_connected_channels(*, environ: dict[str, str] | None = None) -> tuple[C
             continue
         seen.add(channel_id)
         channels.append(ConnectedChannel(channel_id=channel_id))
-    if not channels:
-        raise BroadcastConfigError(
-            f"Set {YOUTUBE_CHANNEL_ID_ENV} or {YOUTUBE_CHANNEL_IDS_ENV} to the "
-            "authorized channel id(s). Do not hard-code a channel in source."
-        )
     return tuple(channels)
 
 
@@ -81,8 +76,11 @@ def load_runtime_config(*, environ: dict[str, str] | None = None) -> BroadcastRu
                 f"{SYNC_INTERVAL_ENV} must be a number of seconds"
             ) from exc
     else:
+        oauth_app = bool((env.get("LSGC_GOOGLE_CLIENT_ID") or "").strip())
         interval = (
-            DEFAULT_OAUTH_SYNC_INTERVAL_S if access_token else DEFAULT_SYNC_INTERVAL_S
+            DEFAULT_OAUTH_SYNC_INTERVAL_S
+            if access_token or oauth_app
+            else DEFAULT_SYNC_INTERVAL_S
         )
     if interval <= 0:
         raise BroadcastConfigError("sync interval must be > 0")

@@ -11,8 +11,15 @@ afterEach(() => {
 test("home renders live upcoming and ended sections from the API", async () => {
   vi.stubGlobal(
     "fetch",
-    vi.fn(async () =>
-      new Response(
+    vi.fn(async (input: RequestInfo) => {
+      const url = String(input);
+      if (url.includes("/api/youtube/connections")) {
+        return new Response(JSON.stringify({ connections: [] }), {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        });
+      }
+      return new Response(
         JSON.stringify({
           games: [liveGame, upcomingGame, endedGame],
           total: 3,
@@ -20,8 +27,8 @@ test("home renders live upcoming and ended sections from the API", async () => {
           offset: 0,
         }),
         { status: 200, headers: { "Content-Type": "application/json" } },
-      ),
-    ),
+      );
+    }),
   );
   vi.stubGlobal(
     "EventSource",

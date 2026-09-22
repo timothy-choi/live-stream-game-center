@@ -279,6 +279,20 @@ class YouTubeDataApiClient:
             and item.lifecycle is not PlatformLifecycle.UNKNOWN
         )
 
+    def list_authorized_channel(self) -> tuple[str | None, str | None]:
+        """channels.list mine=true. Returns the OAuth-selected channel only."""
+        body = self._get("/channels", {"part": "id,snippet", "mine": "true"})
+        items = body.get("items") or []
+        if not isinstance(items, list) or not items:
+            return None, None
+        first = items[0]
+        if not isinstance(first, dict):
+            return None, None
+        channel_id = str(first.get("id") or "").strip() or None
+        snippet = first.get("snippet") if isinstance(first.get("snippet"), dict) else {}
+        title = str(snippet.get("title") or "").strip() or None
+        return channel_id, title
+
     def refresh_videos(
         self, video_ids: Sequence[str]
     ) -> tuple[DiscoveredBroadcast, ...]:
@@ -312,24 +326,38 @@ class YouTubeDataApiClient:
         return self._videos(ids)
 
     def _list_via_live_broadcasts(self) -> list[DiscoveredBroadcast]:
+        """Authenticated owner listing.
+
+        Official liveBroadcasts.list: specify exactly one of broadcastStatus,
+        id, or mine. Combining mine=true with broadcastStatus returns HTTP 400
+        incompatibleParameters. Use mine=true, then keep upcoming/live only so
+        completed history is not imported.
+        https://developers.google.com/youtube/v3/live/docs/liveBroadcasts/list
+        """
         items = collect_paginated_items(
             lambda token: self._get(
                 "/liveBroadcasts",
                 {
                     "part": "id,snippet,status",
                     "mine": "true",
-                    "broadcastStatus": "all",
-                    "broadcastType": "all",
                     "maxResults": "50",
                     **({"pageToken": token} if token else {}),
                 },
             )
         )
         discovered: list[DiscoveredBroadcast] = []
+        seen: set[str] = set()
         for item in items:
             record = discovered_from_live_broadcast_item(item)
-            if record is not None:
-                discovered.append(record)
+            if record is None or record.broadcast_id in seen:
+                continue
+            if record.lifecycle not in {
+                PlatformLifecycle.UPCOMING,
+                PlatformLifecycle.LIVE,
+            }:
+                continue
+            seen.add(record.broadcast_id)
+            discovered.append(record)
         return discovered
 
     def _videos(self, video_ids: Sequence[str]) -> list[DiscoveredBroadcast]:

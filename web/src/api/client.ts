@@ -13,8 +13,9 @@ export function feedRefreshMs(): number {
   return raw * 1000;
 }
 
-export async function apiGet<T>(
+async function apiRequest<T>(
   path: string,
+  method: string,
   init: RequestInit = {},
   fetchImpl: typeof fetch = fetch,
 ): Promise<T> {
@@ -23,7 +24,7 @@ export async function apiGet<T>(
   try {
     response = await fetchImpl(url, {
       ...init,
-      method: "GET",
+      method,
       headers: { Accept: "application/json", ...(init.headers || {}) },
     });
   } catch {
@@ -42,6 +43,26 @@ export async function apiGet<T>(
   }
 }
 
+export async function apiGet<T>(
+  path: string,
+  init: RequestInit = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<T> {
+  return apiRequest<T>(path, "GET", init, fetchImpl);
+}
+
+export async function apiPost<T>(
+  path: string,
+  init: RequestInit = {},
+  fetchImpl: typeof fetch = fetch,
+): Promise<T> {
+  return apiRequest<T>(path, "POST", init, fetchImpl);
+}
+
 export function eventsUrl(gameId: string): string {
   return `${apiBaseUrl()}/api/games/${encodeURIComponent(gameId)}/events`;
+}
+
+export function youtubeOAuthStartUrl(): string {
+  return `${apiBaseUrl()}/api/youtube/oauth/start`;
 }

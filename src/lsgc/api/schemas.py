@@ -139,7 +139,61 @@ class HealthResponse(BaseModel):
     database: str
 
 
+class WorkerDiagnostic(BaseModel):
+    """Read-only M9 worker snapshot. No media URLs or credentials."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    broadcast_id: str
+    state: str
+    frames_emitted: int
+    retry_count: int
+    last_error: str | None = None
+    started_at: str | None = None
+    finished_at: str | None = None
+    next_retry_at: str | None = None
+
+
+class OrchestratorDiagnostic(BaseModel):
+    """Read-only M9 reconciliation status. Does not start tracking."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    orchestrator_enabled: bool
+    last_sync_at: str | None = None
+    last_reconcile_at: str | None = None
+    last_sync_ok: bool | None = None
+    last_sync_error: str | None = None
+    discovered_count: int = 0
+    live_count: int = 0
+    upcoming_count: int = 0
+    ended_count: int = 0
+    active_worker_count: int = 0
+    workers: list[WorkerDiagnostic] = Field(default_factory=list)
+
+
 class ErrorBody(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     detail: str
+
+
+class YoutubeConnectionSummary(BaseModel):
+    """Safe connection fields. Tokens and secrets are forbidden extras."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    id: UUID
+    provider: str
+    youtube_channel_id: str
+    youtube_channel_title: str | None = None
+    status: str
+    calibration_status: str
+    connected_at: str
+    last_refreshed_at: str | None = None
+
+
+class YoutubeConnectionListResponse(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    connections: list[YoutubeConnectionSummary]

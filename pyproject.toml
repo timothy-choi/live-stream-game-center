@@ -23,6 +23,8 @@ dependencies = [
     # Read-only product API + SSE (M11).
     "fastapi>=0.115",
     "uvicorn[standard]>=0.32",
+    # Authenticated Fernet encryption for OAuth refresh credentials (M12.5A).
+    "cryptography>=44.0",
 ]
 
 [project.optional-dependencies]

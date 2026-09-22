@@ -38,6 +38,11 @@ from lsgc.persist.repository import (
 )
 from lsgc.identity.models import ConfirmedMatchupChange
 from lsgc.track.models import ConfirmedScoreChange
+from lsgc.youtube_oauth.models import (
+    ConnectionStatus,
+    OAuthStateRecord,
+    YoutubeConnection,
+)
 
 
 class InMemoryGameRepository:
@@ -52,6 +57,8 @@ class InMemoryGameRepository:
         self.fail_next_end = False
         self.fail_next_matchup_persist = False
         self.fail_next_matchup_conflict = False
+        self._connections: dict[UUID, YoutubeConnection] = {}
+        self._oauth_states: dict[str, OAuthStateRecord] = {}
 
     def ping(self) -> bool:
         return True
@@ -419,6 +426,194 @@ class InMemoryGameRepository:
         self._games[game_id] = updated
         emit_game_change(self._publisher, KIND_MATCHUP_CONFLICT, updated)
         return updated
+
+    def list_connections(self) -> tuple[YoutubeConnection, ...]:
+        items = [
+            item
+            for item in self._connections.values()
+            if item.status is not ConnectionStatus.DISCONNECTED
+        ]
+        return tuple(sorted(items, key=lambda item: item.connected_at, reverse=True))
+
+    def list_active_youtube_connections(self) -> tuple[YoutubeConnection, ...]:
+        items = [
+            item
+            for item in self._connections.values()
+            if item.status is ConnectionStatus.CONNECTED
+        ]
+        return tuple(sorted(items, key=lambda item: item.connected_at, reverse=True))
+
+    def get_connection(self, connection_id: UUID) -> YoutubeConnection:
+        try:
+            return self._connections[connection_id]
+        except KeyError as exc:
+            raise UnknownGameError("connection not found") from exc
+
+    def get_active_connection_for_channel(self, channel_id: str) -> YoutubeConnection | None:
+        for item in self._connections.values():
+            if (
+                item.youtube_channel_id == channel_id
+                and item.status is not ConnectionStatus.DISCONNECTED
+            ):
+                return item
+        return None
+
+    def upsert_connected_channel(
+        self,
+        *,
+        youtube_channel_id: str,
+        youtube_channel_title: str | None,
+        granted_scopes: str | None,
+        refresh_token_ciphertext: str,
+        access_token_ciphertext: str | None,
+        access_token_expires_at,
+        token_type: str | None,
+    ) -> YoutubeConnection:
+        now = datetime.now(tz=UTC)
+        existing = self.get_active_connection_for_channel(youtube_channel_id)
+        if existing is not None:
+            updated = YoutubeConnection(
+                id=existing.id,
+                provider="youtube",
+                youtube_channel_id=youtube_channel_id,
+                youtube_channel_title=youtube_channel_title,
+                status=ConnectionStatus.CONNECTED,
+                granted_scopes=granted_scopes,
+                connected_at=now,
+                created_at=existing.created_at,
+                updated_at=now,
+                last_refreshed_at=now,
+                last_used_at=existing.last_used_at,
+                disconnected_at=None,
+                owner_user_id=existing.owner_user_id,
+                refresh_token_ciphertext=refresh_token_ciphertext,
+                access_token_ciphertext=access_token_ciphertext,
+                access_token_expires_at=access_token_expires_at,
+                token_type=token_type,
+            )
+            self._connections[existing.id] = updated
+            return updated
+        connection = YoutubeConnection(
+            id=uuid4(),
+            provider="youtube",
+            youtube_channel_id=youtube_channel_id,
+            youtube_channel_title=youtube_channel_title,
+            status=ConnectionStatus.CONNECTED,
+            granted_scopes=granted_scopes,
+            connected_at=now,
+            created_at=now,
+            updated_at=now,
+            last_refreshed_at=now,
+            refresh_token_ciphertext=refresh_token_ciphertext,
+            access_token_ciphertext=access_token_ciphertext,
+            access_token_expires_at=access_token_expires_at,
+            token_type=token_type,
+        )
+        self._connections[connection.id] = connection
+        return connection
+
+    def update_tokens(
+        self,
+        connection_id: UUID,
+        *,
+        refresh_token_ciphertext: str,
+        access_token_ciphertext: str | None,
+        access_token_expires_at,
+        token_type: str | None,
+        granted_scopes: str | None,
+    ) -> YoutubeConnection:
+        current = self.get_connection(connection_id)
+        now = datetime.now(tz=UTC)
+        updated = YoutubeConnection(
+            id=current.id,
+            provider=current.provider,
+            youtube_channel_id=current.youtube_channel_id,
+            youtube_channel_title=current.youtube_channel_title,
+            status=ConnectionStatus.CONNECTED,
+            granted_scopes=granted_scopes or current.granted_scopes,
+            connected_at=current.connected_at,
+            created_at=current.created_at,
+            updated_at=now,
+            last_refreshed_at=now,
+            last_used_at=now,
+            disconnected_at=None,
+            owner_user_id=current.owner_user_id,
+            refresh_token_ciphertext=refresh_token_ciphertext,
+            access_token_ciphertext=access_token_ciphertext,
+            access_token_expires_at=access_token_expires_at,
+            token_type=token_type,
+        )
+        self._connections[connection_id] = updated
+        return updated
+
+    def mark_needs_reauthorization(self, connection_id: UUID) -> YoutubeConnection:
+        current = self.get_connection(connection_id)
+        now = datetime.now(tz=UTC)
+        updated = YoutubeConnection(
+            id=current.id,
+            provider=current.provider,
+            youtube_channel_id=current.youtube_channel_id,
+            youtube_channel_title=current.youtube_channel_title,
+            status=ConnectionStatus.NEEDS_REAUTHORIZATION,
+            granted_scopes=current.granted_scopes,
+            connected_at=current.connected_at,
+            created_at=current.created_at,
+            updated_at=now,
+            last_refreshed_at=current.last_refreshed_at,
+            last_used_at=current.last_used_at,
+            disconnected_at=None,
+            owner_user_id=current.owner_user_id,
+        )
+        self._connections[connection_id] = updated
+        return updated
+
+    def mark_disconnected(self, connection_id: UUID) -> YoutubeConnection:
+        current = self.get_connection(connection_id)
+        now = datetime.now(tz=UTC)
+        updated = YoutubeConnection(
+            id=current.id,
+            provider=current.provider,
+            youtube_channel_id=current.youtube_channel_id,
+            youtube_channel_title=current.youtube_channel_title,
+            status=ConnectionStatus.DISCONNECTED,
+            granted_scopes=current.granted_scopes,
+            connected_at=current.connected_at,
+            created_at=current.created_at,
+            updated_at=now,
+            last_refreshed_at=current.last_refreshed_at,
+            last_used_at=current.last_used_at,
+            disconnected_at=now,
+            owner_user_id=current.owner_user_id,
+        )
+        self._connections[connection_id] = updated
+        return updated
+
+    def create_oauth_state(self, state: str, *, expires_at) -> OAuthStateRecord:
+        now = datetime.now(tz=UTC)
+        record = OAuthStateRecord(state=state, created_at=now, expires_at=expires_at)
+        self._oauth_states[state] = record
+        return record
+
+    def consume_oauth_state(self, state: str, *, now=None) -> OAuthStateRecord:
+        clock = now or datetime.now(tz=UTC)
+        record = self._oauth_states.get(state)
+        if record is None:
+            raise PersistError("unknown oauth state")
+        if record.consumed_at is not None:
+            raise PersistError("oauth state already used")
+        expires = record.expires_at
+        if expires.tzinfo is None:
+            expires = expires.replace(tzinfo=UTC)
+        if expires <= clock:
+            raise PersistError("oauth state expired")
+        used = OAuthStateRecord(
+            state=record.state,
+            created_at=record.created_at,
+            expires_at=record.expires_at,
+            consumed_at=clock,
+        )
+        self._oauth_states[state] = used
+        return used
 
     def _replace(self, game: Game, **changes: object) -> Game:
         data = game.__dict__.copy()

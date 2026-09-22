@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import logging
 import threading
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime
@@ -23,6 +24,8 @@ from lsgc.persist.models import Game, TrackingStatus
 
 ClockFn = Callable[[], datetime]
 WaitFn = Callable[[threading.Event, float], bool]
+
+_LOG = logging.getLogger("lsgc.broadcast")
 
 
 def _utc_now() -> datetime:
@@ -47,10 +50,12 @@ class BroadcastOrchestrator:
         interval_s: float = DEFAULT_SYNC_INTERVAL_S,
         clock: ClockFn = _utc_now,
         wait: WaitFn = _wait,
+        channel_provider: Callable[[], Sequence[ConnectedChannel]] | None = None,
     ) -> None:
         if interval_s <= 0:
             raise ValueError("interval_s must be > 0")
         self._channels = tuple(channels)
+        self._channel_provider = channel_provider
         self._synchronizer = synchronizer
         self._supervisor = supervisor
         self._store = store
@@ -88,7 +93,7 @@ class BroadcastOrchestrator:
         any_sync_ok = True
         last_error: str | None = None
         last_sync_at = self._status.last_sync_at
-        for channel in self._channels:
+        for channel in self._active_channels():
             report = self._synchronizer.sync_channel(channel.channel_id)
             last_sync_at = report.synced_at or last_sync_at
             if not report.ok:
@@ -116,6 +121,17 @@ class BroadcastOrchestrator:
             ended_count=ended,
             active_worker_count=len(self._supervisor.active_ids()),
             workers=workers,
+        )
+        _LOG.info(
+            "reconcile sync_ok=%s discovered=%s live=%s upcoming=%s ended=%s "
+            "workers=%s error=%s",
+            self._status.last_sync_ok,
+            self._status.discovered_count,
+            self._status.live_count,
+            self._status.upcoming_count,
+            self._status.ended_count,
+            self._status.active_worker_count,
+            self._status.last_sync_error or "-",
         )
         return self._status
 
@@ -163,6 +179,11 @@ class BroadcastOrchestrator:
         if game.platform_lifecycle is PlatformLifecycle.ENDED:
             self._store.mark_acquisition_ended(game.id)  # type: ignore[attr-defined]
 
+    def _active_channels(self) -> tuple[ConnectedChannel, ...]:
+        if self._channel_provider is not None:
+            return tuple(self._channel_provider())
+        return self._channels
+
     def worker_snapshot(self, broadcast_id: str) -> WorkerSnapshot | None:
         for item in self._supervisor.snapshots():
             if item.broadcast_id == broadcast_id:
@@ -180,6 +201,7 @@ def orchestrator_from_config(
     pipeline_factory=None,
     tracker_factory=None,
     clock: ClockFn = _utc_now,
+    channel_provider=None,
 ) -> BroadcastOrchestrator:
     from lsgc.broadcast.sync import ChannelSynchronizer as Sync
     from lsgc.broadcast.supervisor import TrackingSupervisor as Supervisor
@@ -204,4 +226,5 @@ def orchestrator_from_config(
         calibration,
         interval_s=config.sync_interval_s,
         clock=clock,
+        channel_provider=channel_provider,
     )

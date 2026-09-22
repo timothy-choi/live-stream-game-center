@@ -18,9 +18,11 @@ function walk(dir: string): string[] {
 test("frontend only uses M11 read endpoints", () => {
   const files = walk(join(process.cwd(), "src")).filter((path) => !path.includes("/test/"));
   const blob = files.map((path) => readFileSync(path, "utf8")).join("\n");
-  expect(blob).not.toMatch(/ensure_tracking|LiveFrameSession|calibrat|ocr|yt-dlp|signed media/i);
-  expect(blob).not.toMatch(/method:\s*["'](POST|PUT|PATCH|DELETE)["']/);
+  expect(blob).not.toMatch(/ensure_tracking|LiveFrameSession|\bocr\b|yt-dlp|signed media/i);
+  expect(blob).not.toMatch(/method:\s*["'](PUT|PATCH|DELETE)["']/);
   expect(blob).toContain("/api/games");
   expect(blob).toContain("/score-events");
   expect(blob).toContain("/events");
+  expect(blob).toContain("/api/youtube/connections");
+  expect(blob).toContain("/api/youtube/oauth/start");
 });

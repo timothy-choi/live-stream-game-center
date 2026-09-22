@@ -801,6 +801,51 @@ class PostgresGameRepository:
         emit_game_change(self._publisher, KIND_MATCHUP_CONFLICT, game)
         return game
 
+    def _youtube(self):
+        from lsgc.youtube_oauth.repository import PostgresYoutubeConnectionRepository
+
+        return PostgresYoutubeConnectionRepository(self._conn)
+
+    @_serialized
+    def list_connections(self):
+        return self._youtube().list_connections()
+
+    @_serialized
+    def list_active_youtube_connections(self):
+        return self._youtube().list_active_youtube_connections()
+
+    @_serialized
+    def get_connection(self, connection_id: UUID):
+        return self._youtube().get_connection(connection_id)
+
+    @_serialized
+    def get_active_connection_for_channel(self, channel_id: str):
+        return self._youtube().get_active_connection_for_channel(channel_id)
+
+    @_serialized
+    def upsert_connected_channel(self, **kwargs):
+        return self._youtube().upsert_connected_channel(**kwargs)
+
+    @_serialized
+    def update_tokens(self, connection_id: UUID, **kwargs):
+        return self._youtube().update_tokens(connection_id, **kwargs)
+
+    @_serialized
+    def mark_needs_reauthorization(self, connection_id: UUID):
+        return self._youtube().mark_needs_reauthorization(connection_id)
+
+    @_serialized
+    def mark_disconnected(self, connection_id: UUID):
+        return self._youtube().mark_disconnected(connection_id)
+
+    @_serialized
+    def create_oauth_state(self, state: str, *, expires_at):
+        return self._youtube().create_oauth_state(state, expires_at=expires_at)
+
+    @_serialized
+    def consume_oauth_state(self, state: str, *, now=None):
+        return self._youtube().consume_oauth_state(state, now=now)
+
 
 def _matchup_from_row(row: dict_row | dict) -> ConfirmedMatchupChange:
     return ConfirmedMatchupChange(

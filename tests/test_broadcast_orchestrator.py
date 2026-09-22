@@ -7,7 +7,6 @@ import time
 from datetime import UTC, datetime
 
 import numpy as np
-import pytest
 
 from lsgc.broadcast.calibration import MappingCalibrationLookup
 from lsgc.broadcast.eligibility import evaluate_eligibility
@@ -432,12 +431,10 @@ def test_cli_parser_has_sync_and_run() -> None:
     assert parser.parse_args(["run"]).command == "run"
 
 
-def test_config_requires_explicit_channel() -> None:
+def test_config_allows_empty_channels_for_oauth_onboarding() -> None:
     from lsgc.broadcast.config import load_connected_channels
-    from lsgc.broadcast.errors import BroadcastConfigError
 
-    with pytest.raises(BroadcastConfigError):
-        load_connected_channels(environ={})
+    assert load_connected_channels(environ={}) == ()
     channels = load_connected_channels(
         environ={"LSGC_YOUTUBE_CHANNEL_ID": "UC_CHANNEL_A"}
     )

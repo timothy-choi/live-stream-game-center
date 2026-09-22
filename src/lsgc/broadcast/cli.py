@@ -20,8 +20,8 @@ from lsgc.broadcast.errors import BroadcastError
 from lsgc.broadcast.orchestrator import orchestrator_from_config
 from lsgc.broadcast.sanitize import sanitize_control_plane_text
 from lsgc.broadcast.sync import ChannelSynchronizer
-from lsgc.broadcast.youtube import YouTubeDataApiClient
 from lsgc.persist.config import database_url
+from lsgc.youtube_oauth.catalog import merge_sync_channels
 from lsgc.persist.migrate import apply_migrations, connect
 from lsgc.persist.repository import PostgresGameRepository
 
@@ -63,17 +63,17 @@ def main(argv: list[str] | None = None) -> int:
 
 def _sync() -> int:
     config = load_runtime_config()
-    catalog = YouTubeDataApiClient(
-        api_key=config.api_key, access_token=config.access_token
-    )
     dsn = database_url()
     with connect(dsn) as conn:
         apply_migrations(conn)
         conn.commit()
         store = PostgresGameRepository(conn)
+        catalog, channels, lookup = _hybrid_catalog(config, store)
+        if not channels:
+            print("no connected YouTube channels", flush=True)
+            return EXIT_OK
         sync = ChannelSynchronizer(catalog, store)
-        lookup = FilesystemCalibrationLookup(config.calibration_dir)
-        for channel in config.channels:
+        for channel in channels:
             report = sync.sync_channel(channel.channel_id)
             _print_report(report)
             if not report.ok:
@@ -101,11 +101,23 @@ def _sync() -> int:
     return EXIT_OK
 
 
+def _hybrid_catalog(config, store):
+    from lsgc.youtube_oauth.catalog import HybridBroadcastCatalog, merge_sync_channels
+    from lsgc.youtube_oauth.service import maybe_connection_service
+
+    lookup = FilesystemCalibrationLookup(config.calibration_dir)
+    service = maybe_connection_service(store, lookup)
+    catalog = HybridBroadcastCatalog(
+        store=store,
+        service=service,
+        developer_api_key=config.api_key,
+        developer_access_token=config.access_token,
+    )
+    return catalog, merge_sync_channels(store, config.channels), lookup
+
+
 def _run() -> int:
     config = load_runtime_config()
-    catalog = YouTubeDataApiClient(
-        api_key=config.api_key, access_token=config.access_token
-    )
     dsn = database_url()
     stop = threading.Event()
 
@@ -118,15 +130,16 @@ def _run() -> int:
         apply_migrations(conn)
         conn.commit()
         store = PostgresGameRepository(conn)
-        lookup = FilesystemCalibrationLookup(config.calibration_dir)
+        catalog, channels, lookup = _hybrid_catalog(config, store)
         orchestrator = orchestrator_from_config(
             config,
             store=store,
             catalog=catalog,
             calibration=lookup,
+            channel_provider=lambda: merge_sync_channels(store, config.channels),
         )
         print(
-            f"channels={','.join(ch.channel_id for ch in config.channels)} "
+            f"channels={','.join(ch.channel_id for ch in channels) or '-'} "
             f"interval_s={config.sync_interval_s:g} "
             f"(ctrl+c to stop)",
             flush=True,

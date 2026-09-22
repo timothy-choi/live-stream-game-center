@@ -3,7 +3,7 @@
 Shared memory across coding sessions and tools. Keep it short and factual.
 Record only what has actually been run and observed.
 
-Last updated: 2026-09-21 (Milestone 12 PASS)
+Last updated: 2026-09-21 (M12 PASS; M12.5A YouTube OAuth connection PASS)
 
 ## Product
 
@@ -45,6 +45,7 @@ boundary exists (M11). A React scoreboard/detail consumer exists (M12).
 | M10 | Team / opponent identity + temporal matchup + durable matchup | **PASS, verified** |
 | M11 | API (REST / live updates) | **PASS, verified** |
 | M12 | Frontend scoreboard and game pages | **PASS, verified** |
+| M12.5A | YouTube OAuth channel connection | **PASS, verified** |
 
 ## M0 status: PASS
 
@@ -441,7 +442,9 @@ python tools/m9_validate.py   # optional; needs credentials; pytest never calls 
 - **Control plane:** `search.list` (`eventType=live|upcoming`) + `videos.list`
   (`snippet,liveStreamingDetails`) with an API key. If
   `LSGC_YOUTUBE_ACCESS_TOKEN` is set, `liveBroadcasts.list mine=true`
-  `broadcastStatus=all` `broadcastType=all` is preferred (owner broadcasts,
+  `mine=true` alone is the official single filter (combining `mine` with
+  `broadcastStatus` is `incompatibleParameters`); upcoming/live are kept and
+  completed history is not imported,
   including unscheduled/persistent). OAuth scopes documented by Google:
   `youtube.readonly` / `youtube` / `youtube.force-ssl`.
 - **Data plane:** unchanged M4 `LiveFrameSession` on
@@ -1646,14 +1649,71 @@ the game leaves LIVE. Feed membership polls every 60s and on focus.
 - Demo API seed is not production data.
 - Controlled real disruption/recovery remains unverified from M4.
 
+## M12.5A status: PASS
+
+Real Google consent completed through the local app. Authorized channel
+`UCz3q0f-dMPNIyQhntPTE7gQ` / NFL Super Season Full Videos. Existing Arcade
+calibration matched automatically (READY). Stored Fernet-encrypted refresh
+authorization survived backend restart and still called
+`channels.list mine=true` and `liveBroadcasts.list mine=true`. Official
+`liveBroadcasts.list` accepts exactly one of `mine` / `broadcastStatus` /
+`id`; combining `mine` with `broadcastStatus` is `incompatibleParameters`.
+
+## M12.5A notes (architecture)
+
+Product path (primary):
+
+Connect YouTube → Google OAuth (youtube.readonly) →
+`channels.list mine=true` → persist exact channel + encrypted refresh →
+calibration lookup by exact channel ID → authenticated
+`liveBroadcasts.list mine=true` for that connection.
+
+Three layers stay distinct: **application** OAuth client ID/secret,
+**user** Google consent, **per-channel** visual calibration.
+
+This is YouTube account connection only. There are still no application
+accounts, passwords, or sessions. `owner_user_id` is reserved.
+
+Brand Accounts: Google's OAuth picker plus `mine=true` expose the one
+currently selected channel, not every channel a Google login can access.
+
+Local disconnect clears stored credentials and best-effort revokes at
+`https://oauth2.googleapis.com/revoke`. That is not the same as Google
+showing the app as fully removed if revoke fails.
+
+Official sources used:
+
+- https://developers.google.com/identity/protocols/oauth2/web-server
+- https://developers.google.com/youtube/v3/guides/auth/server-side-web-apps
+- https://developers.google.com/youtube/v3/docs/channels/list
+- https://developers.google.com/youtube/v3/docs/liveBroadcasts/list
+
+PKCE is not implemented: the official confidential web-server guide does
+not require it for this flow.
+
+Real Google consent has **not** been completed. Do not treat M12.5A as PASS.
+
+## Live product path: NOT YET PASSING
+
+The intended chain is:
+
+real scheduled YouTube stream → Data API discovery → LIVE → M9 worker →
+M4 frames → M3/M6/M10 → M7 → M8 persist → M11 SSE → M12 home page update.
+
+This has **not** been observed as one run. M12.5 preflight stopped because
+production orchestration previously required a manual channel ID and API
+key. M12.5A inserts OAuth connection first. Do not resume the real-live
+M12.5 test until OAuth is authorized.
+
 ## Next action
 
-M12 is complete for its intended scope (scoreboard + detail + SSE + embed).
-**Accounts and owner tools are not started.** Controlled real
-disruption/recovery remains unverified from M4.
+Complete one real Google OAuth consent against the local M12 app, then
+prove stored authorization can call authenticated `liveBroadcasts.list`.
+Do not resume the real-live M12.5 stream test yet.
 
 Explicitly **not** implied by M12 PASS: official/final/corrected score,
-owner mutation APIs, authentication, title-derived matchup, 32-team visual
-coverage, text-mode OCR, quarter/clock OCR, automatic new-game detection,
-football increment rules, multi-host locking, distributed event brokers.
+owner mutation APIs, application authentication, title-derived matchup,
+32-team visual coverage, text-mode OCR, quarter/clock OCR, automatic
+new-game detection, football increment rules, multi-host locking,
+distributed event brokers, or a real YouTube → home-page update.
 

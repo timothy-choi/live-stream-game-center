@@ -107,6 +107,24 @@ export class ApiError extends Error {
   }
 }
 
+export type YoutubeConnectionStatus = "CONNECTED" | "NEEDS_REAUTHORIZATION" | "DISCONNECTED";
+export type CalibrationStatus = "READY" | "NEEDS_CALIBRATION";
+
+export interface YoutubeConnectionSummary {
+  id: string;
+  provider: string;
+  youtube_channel_id: string;
+  youtube_channel_title: string | null;
+  status: YoutubeConnectionStatus | string;
+  calibration_status: CalibrationStatus | string;
+  connected_at: string;
+  last_refreshed_at: string | null;
+}
+
+export interface YoutubeConnectionListResponse {
+  connections: YoutubeConnectionSummary[];
+}
+
 export class NotFoundError extends ApiError {
   constructor(message = "game not found") {
     super(404, message);

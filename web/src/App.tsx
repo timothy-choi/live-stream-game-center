@@ -2,6 +2,7 @@ import { Link, Navigate, Route, Routes } from "react-router-dom";
 import { GameDetailPage } from "./pages/GameDetailPage";
 import { HomePage } from "./pages/HomePage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { YouTubeConnectedPage } from "./pages/YouTubeConnectedPage";
 
 export function App() {
   return (
@@ -16,6 +17,7 @@ export function App() {
       </header>
       <Routes>
         <Route path="/" element={<HomePage />} />
+        <Route path="/youtube/connected" element={<YouTubeConnectedPage />} />
         <Route path="/games/:gameId" element={<GameDetailPage />} />
         <Route path="/home" element={<Navigate to="/" replace />} />
         <Route path="*" element={<NotFoundPage />} />

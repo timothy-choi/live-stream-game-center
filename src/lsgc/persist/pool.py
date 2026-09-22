@@ -20,6 +20,8 @@ from lsgc.persist.notify import GameChangePublisher
 from lsgc.persist.repository import PostgresGameRepository
 from lsgc.identity.models import ConfirmedMatchupChange
 from lsgc.track.models import ConfirmedScoreChange
+from lsgc.youtube_oauth.models import YoutubeConnection
+from lsgc.youtube_oauth.repository import PostgresYoutubeConnectionRepository
 
 
 def open_pool(dsn: str, *, min_size: int = 1, max_size: int = 8) -> ConnectionPool:
@@ -47,6 +49,11 @@ class PooledGameRepository:
     def _repo(self) -> Iterator[PostgresGameRepository]:
         with self._pool.connection() as conn:
             yield PostgresGameRepository(conn, publisher=self._publisher)
+
+    @contextmanager
+    def _connections(self) -> Iterator[PostgresYoutubeConnectionRepository]:
+        with self._pool.connection() as conn:
+            yield PostgresYoutubeConnectionRepository(conn)
 
     def ping(self) -> bool:
         with self._pool.connection() as conn:
@@ -132,6 +139,46 @@ class PooledGameRepository:
     def record_worker_finished(self, game_id: UUID, **kwargs: Any) -> Game:
         with self._repo() as repo:
             return repo.record_worker_finished(game_id, **kwargs)
+
+    def list_connections(self) -> tuple[YoutubeConnection, ...]:
+        with self._connections() as repo:
+            return repo.list_connections()
+
+    def list_active_youtube_connections(self) -> tuple[YoutubeConnection, ...]:
+        with self._connections() as repo:
+            return repo.list_active_youtube_connections()
+
+    def get_connection(self, connection_id: UUID) -> YoutubeConnection:
+        with self._connections() as repo:
+            return repo.get_connection(connection_id)
+
+    def get_active_connection_for_channel(self, channel_id: str) -> YoutubeConnection | None:
+        with self._connections() as repo:
+            return repo.get_active_connection_for_channel(channel_id)
+
+    def upsert_connected_channel(self, **kwargs: Any) -> YoutubeConnection:
+        with self._connections() as repo:
+            return repo.upsert_connected_channel(**kwargs)
+
+    def update_tokens(self, connection_id: UUID, **kwargs: Any) -> YoutubeConnection:
+        with self._connections() as repo:
+            return repo.update_tokens(connection_id, **kwargs)
+
+    def mark_needs_reauthorization(self, connection_id: UUID) -> YoutubeConnection:
+        with self._connections() as repo:
+            return repo.mark_needs_reauthorization(connection_id)
+
+    def mark_disconnected(self, connection_id: UUID) -> YoutubeConnection:
+        with self._connections() as repo:
+            return repo.mark_disconnected(connection_id)
+
+    def create_oauth_state(self, state: str, *, expires_at) -> object:
+        with self._connections() as repo:
+            return repo.create_oauth_state(state, expires_at=expires_at)
+
+    def consume_oauth_state(self, state: str, *, now=None) -> object:
+        with self._connections() as repo:
+            return repo.consume_oauth_state(state, now=now)
 
     def close(self) -> None:
         self._pool.close()
